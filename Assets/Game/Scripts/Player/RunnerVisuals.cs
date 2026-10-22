@@ -57,11 +57,11 @@ namespace NeonVelocity.Player
             _visual.SetParent(transform, false);
             Color suitDark = Color.Lerp(character.secondary, Palette.Void, 0.62f);
             Color accent = character.primary;
-            Material suit = MaterialLibrary.Lit(suitDark, 0.55f, 0.45f);
-            Material armor = MaterialLibrary.Lit(Color.Lerp(suitDark, Palette.PanelBright, 0.45f), 0.8f, 0.7f);
-            Material neon = MaterialLibrary.Lit(accent, 0.2f, 0.8f, accent, 2.8f);
-            Material dark = MaterialLibrary.Lit(Palette.Void, 0.1f, 0.25f);
-            Material visor = MaterialLibrary.Lit(Color.Lerp(accent, Color.white, 0.35f), 0.9f, 0.95f, accent, 3f);
+            Material suit = MaterialLibrary.Lit(suitDark, 0.38f, 0.72f);
+            Material armor = MaterialLibrary.Lit(Color.Lerp(suitDark, Palette.PanelBright, 0.45f), 0.82f, 0.88f);
+            Material neon = MaterialLibrary.Lit(accent, 0.2f, 0.8f, accent, 3.1f);
+            Material dark = MaterialLibrary.Lit(Palette.Void, 0.35f, 0.58f);
+            Material visor = MaterialLibrary.Lit(Color.Lerp(accent, Color.white, 0.35f), 0.95f, 0.98f, accent, 3.2f);
             Material trailMat = MaterialLibrary.Trail(trail != null ? trail.color : character.trail);
 
             // Pelvis and torso.
@@ -273,8 +273,9 @@ namespace NeonVelocity.Player
             _bob = Mathf.Abs(Mathf.Sin(_phase)) * 0.028f;
 
             Vector3 hipPos = new Vector3(0f, 0.94f + _bob, 0f);
-            Quaternion torsoRot = Quaternion.Euler(6f, 0f, _lateralLean);
-            Quaternion headRot = Quaternion.Euler(-2f, _lateralLean * 0.25f, 0f);
+            float runLean = 7f + speedNormalised * 8f;
+            Quaternion torsoRot = Quaternion.Euler(runLean, 0f, _lateralLean);
+            Quaternion headRot = Quaternion.Euler(-runLean * 0.34f, _lateralLean * 0.25f, 0f);
             float legLX = s * 55f, legRX = -s * 55f;
             float kneeLX = Mathf.Max(0f, -s) * 58f, kneeRX = Mathf.Max(0f, s) * 58f;
             float armLX = -s * 52f, armRX = s * 52f;

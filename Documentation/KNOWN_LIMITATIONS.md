@@ -4,13 +4,14 @@ This document records what is genuinely complete, what is constrained by the cur
 
 ## 1. Verification status
 
-### Verified in this environment (22 October 2026)
+### Verified in this environment (23 October 2026)
 
 - Unity **6000.6.7f1** imported and compiled the project with **0 errors** after the editor-only assembly boundary was added.
-- **50 / 50** headless gameplay-core tests, **9 / 9** Python authority tests and **630** static checks passed.
+- **50 / 50** headless gameplay-core tests, **9 / 9** Python authority tests and **646** static checks passed.
 - **19 / 19** Unity EditMode tests passed.
-- **1 / 1** Unity PlayMode smoke test passed: real bootstrap, main menu, title stage, Practice start, a 3.5-second live update window and clean shutdown.
-- A universal **x86_64 + ARM64** macOS player (`Builds/macOS/NeonVelocity.app`, 116.8 MiB) was built and launched. The final Player.log has no shader-stripping errors, Input System exceptions or null-shader crashes.
+- **2 / 2** Unity PlayMode tests passed: real bootstrap, main menu, title stage, Practice start, a 3.5-second live update window, clean shutdown and a quick-tap jump regression.
+- Developer-run visual captures of the built menu and Practice frames confirmed the generated road, sidewalks, city facades and wet material render in the player. This is a smoke check, not a full manual graphics review.
+- A universal **x86_64 + ARM64** macOS player (`Builds/macOS/NeonVelocity.app`, 116.9 MiB) was built and launched. The final Player.log has no shader-stripping errors, Input System exceptions or null-shader crashes.
 - The app is **ad-hoc signed** only; there is no Developer ID, hardened runtime or notarisation.
 
 ### Still unverified
@@ -112,7 +113,7 @@ Bots fill empty slots to five and are simulated by the server at 17.0–23.5 m/s
 ## 6. Documentation and licensing constraints
 
 - The project is maintained in the GitHub repository `Ridma-kithara/NEON-VELOCITY`, but has **no CI pipeline**, code-signing identity or release channel. Builds and releases must be produced separately.
-- URP post-processing resource stripping is disabled in `UniversalRenderPipelineGlobalSettings.asset` so runtime-created volume profiles keep Bloom, depth of field, motion blur and Panini shaders. This increases player size slightly; the tested macOS bundle is 116.8 MiB.
+- URP post-processing resource stripping is disabled in `UniversalRenderPipelineGlobalSettings.asset` so runtime-created volume profiles keep Bloom, depth of field, motion blur and Panini shaders. This increases player size slightly; the tested macOS bundle is 116.9 MiB.
 - Third-party packages are Unity packages only (URP, Input System, uGUI, Test Framework, IDE integrations), governed by Unity's package/template licences. There is no third-party runtime dependency list beyond Unity itself and Python's standard library.
 - Original assets are delivered as-is for RK VANTAGE GAMES. No trademark registration or copyright registration is claimed or performed by this project.
 - `Tools/generate_audio.py` reproduces the WAV files; `Tools/generate_meta.py` reproduces meta GUIDs from asset paths. Regenerating metas for existing assets is safe only while an asset path is unchanged.

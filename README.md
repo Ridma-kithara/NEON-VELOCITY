@@ -2,7 +2,7 @@
 
 **RK VANTAGE GAMES** presents a three-lane, neon-noir endless runner built in **Unity 6000.6.7f1**, **Universal Render Pipeline**, **Input System** and **C#**, with an original authoritative multiplayer backend written in dependency-free **Python**.
 
-> **Verification notice (22 October 2026):** Unity 6000.6.7f1 Personal licensing is active. The project imports and compiles in Unity, **19/19 EditMode** and **1/1 PlayMode** tests pass, and a **universal (Intel + Apple silicon) macOS player** was built and launched successfully. The PlayMode smoke test covers real boot, main menu, a practice session and clean shutdown. **50/50** headless core tests, **9/9** Python authority tests and **630** static checks also pass. Other platform builds, real-device input/audio, performance profiling and real-network multiplayer remain unverified. See [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
+> **Verification notice (23 October 2026):** Unity 6000.6.7f1 Personal licensing is active. The project imports and compiles in Unity, **19/19 EditMode** and **2/2 PlayMode** tests pass, and a **universal (Intel + Apple silicon) macOS player** was built and launched successfully. The PlayMode tests cover real boot, main menu, a practice session, clean shutdown and a quick-tap jump regression. **50/50** headless core tests, **9/9** Python authority tests and **646** static checks also pass. Other platform builds, real-device input/audio, performance profiling and real-network multiplayer remain unverified. See [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
 
 ---
 
@@ -40,7 +40,7 @@ Run a rain-slicked city grid that never ends. Switch three lanes, jump low barri
 - **10 power-ups** — magnet, shield, score surge, volt rush, spectre board, phase shell, air jump, time dilation (offline only), credit storm and rare prism dash.
 - **Progression** — credits, XP/levels (1–100), season levels, 5 runners, 4 trails, permanent magnet/shield/multiplier/boost/head-start upgrades, daily and weekly missions, lifetime achievements, daily supply drops and local bests/leaderboards.
 - **Online authority** — quick match and private codes, host-controlled start, server-filled bots to five, 10 Hz validated snapshots, results, verified rewards, leaderboard persistence, 45 s reconnect grace and automatic client reconnection.
-- **Presentation** — runtime-generated URP world (four neon themes), original synthesized music/ambience/14 SFX, speed lines, particles, camera shake, screen fades, toasts and a complete runtime UI. No external art or audio packs.
+- **Presentation** — runtime-generated URP world (four neon themes) with generated asphalt/concrete/normal maps, a wet multi-layer road, denser skyline and storefront neon, soft shadows, atmospheric mist/rain and cinematic post-processing. Original synthesized music/ambience/14 SFX, speed lines, particles, camera shake, screen fades, toasts and a complete runtime UI. No external art or audio packs.
 - **Offline first** — every single-player mode works without the backend; online is never simulated when the server is absent.
 
 ### Controls
@@ -112,7 +112,7 @@ Assets/Game/
   Scripts/Editor/BuildTools.cs   Project configuration + platform build entry points
   Scripts/Editor/NeonVelocity.EditorTools.asmdef  Editor-only assembly boundary
   Tests/EditMode/                NUnit core + save tests
-  Tests/PlayMode/                Boot/menu/practice smoke test
+  Tests/PlayMode/                Boot/menu/practice + jump regression tests
   Resources/Audio/               21 original WAV assets (music, ambience, SFX)
   Resources/Materials/           Pinned URP shader templates used by the runtime
 Backend/
@@ -149,7 +149,7 @@ dotnet run --project Tools/CoreTests/CoreTests.csproj -c Release
 # Backend integration tests
 python3 -m unittest discover -s Backend/tests -v
 
-# Static project integrity (630 checks)
+# Static project integrity (646 checks)
 python3 Tools/validate_project.py
 ```
 
@@ -157,7 +157,7 @@ Unity tests run through the Test Framework and pass in this environment:
 
 ```text
 EditMode: 19 / 19 passed
-PlayMode:  1 / 1 passed (boot + menu + practice smoke)
+PlayMode:  2 / 2 passed (boot + menu + practice smoke + quick-tap jump)
 ```
 
 Build the verified macOS target:
@@ -171,7 +171,7 @@ UNITY="/Applications/Unity/Hub/Editor/6000.6.7f1/Unity.app/Contents/MacOS/Unity"
 open "Builds/macOS/NeonVelocity.app"
 ```
 
-The build tool configures a universal **x86_64 + ARM64** app, creates the pinned URP material templates and retains the post-processing shaders URP would otherwise strip. The verified output was **116.8 MiB**, ad-hoc signed, and launched successfully on this Intel Mac.
+The build tool configures a universal **x86_64 + ARM64** app, creates the pinned URP material templates and retains the post-processing shaders URP would otherwise strip. The verified output was **116.9 MiB**, ad-hoc signed, and launched successfully on this Intel Mac. A developer-only capture flag (`-nv-capture <directory>`) can save menu and practice screenshots from the built player for visual smoke checks.
 
 **Build status:** macOS universal player built and launched; editor EditMode/PlayMode tests pass. Windows, Linux, WebGL, Android and iOS builds remain unverified, and no real-device, performance or multi-machine network validation has been performed. Android/iOS modules and SDKs are not available here.
 

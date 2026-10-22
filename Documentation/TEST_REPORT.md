@@ -1,6 +1,6 @@
 # NEON VELOCITY — Test Report
 
-**Date:** 22 October 2026
+**Date:** 23 October 2026
 
 **Build under test:** source tree + macOS player, version 1.0.0
 
@@ -14,12 +14,13 @@ This report separates checks that were actually executed from work that remains 
 |---|---|---|
 | Headless gameplay-core tests (`Tools/CoreTests`) | **50 / 50 passed** | Executed |
 | Python authority integration tests (`Backend/tests`) | **9 / 9 passed** in 10.4 s | Executed |
-| Static project integrity (`Tools/validate_project.py`) | **630 / 630 checks passed** | Executed |
+| Static project integrity (`Tools/validate_project.py`) | **646 / 646 checks passed** | Executed |
 | Unity 6000.6.7f1 project import and script compilation | **0 errors**; warnings cleaned | Executed |
 | Unity EditMode tests | **19 / 19 passed** | Executed |
-| Unity PlayMode smoke test | **1 / 1 passed** | Executed |
-| macOS universal player build | **Succeeded** (116.8 MiB, x86_64 + ARM64) | Executed |
+| Unity PlayMode tests | **2 / 2 passed** | Executed |
+| macOS universal player build | **Succeeded** (116.9 MiB, x86_64 + ARM64) | Executed |
 | macOS player launch | **Launched**, booted menu without runtime exceptions | Executed |
+| In-app menu/practice visual capture | **Captured and inspected** (track, city, wet road and menu render) | Executed |
 | WebGL player build | Not built | Unverified |
 | Windows/Linux player builds | Not built | Unverified |
 | Android APK/AAB | Not built | Unverified |
@@ -29,7 +30,7 @@ This report separates checks that were actually executed from work that remains 
 | Real-network two/five-client race | Not performed | Unverified |
 | Performance/memory profiling, signing/notarisation | Not performed | Unverified |
 
-**Conclusion:** the core logic, authority, Unity runtime bootstrap, EditMode coverage, PlayMode menu/practice smoke flow and a universal macOS player are now verified. The macOS build launches and runs without the earlier shader and input exceptions. Other platforms, broader gameplay coverage, real devices/networks and release packaging remain outstanding.
+**Conclusion:** the core logic, authority, Unity runtime bootstrap, EditMode coverage, PlayMode menu/practice/jump flow, generated visuals in the built player and a universal macOS player are now verified. The macOS build launches and runs without the earlier shader and input exceptions. Other platforms, broader gameplay coverage, real devices/networks and release packaging remain outstanding.
 
 ## 2. Headless core tests
 
@@ -106,9 +107,9 @@ Coverage includes lane math, authored/generated track validation, deterministic 
 
 One stale assertion was found and corrected: the test expected level 2 at `TotalXpForLevel(3)`, but the one-based curve correctly returns level 3. The test now checks the actual level boundaries.
 
-## 6. Unity PlayMode smoke test
+## 6. Unity PlayMode tests
 
-**Result: 1 / 1 passed.**
+**Result: 2 / 2 passed.**
 
 `BootSmokeTests.AppBootsMainMenuAndStartsPractice` executes the real runtime bootstrap and checks:
 
@@ -119,6 +120,8 @@ One stale assertion was found and corrected: the test expected level 2 at `Total
 - after the countdown, the real update loop advances the runner for 3.5 s;
 - the run is not accidentally finished during the smoke window;
 - the session shuts down cleanly.
+
+`BootSmokeTests.QuickTapJumpClearsLowBarrierHeight` drives a real short jump input through the private input/runtime path and verifies that the runner clears a low obstacle. This covers the minimum-tap clearance fix; it is not a substitute for a manual jump/obstacle playthrough.
 
 The first PlayMode run found an unexpected Unity log assertion from setting `ParticleSystem.main.duration` while a newly created system was already playing. `VfxService` now stops each system before configuring it; the suite passes with no unexpected runtime logs.
 
@@ -136,7 +139,7 @@ UNITY="/Applications/Unity/Hub/Editor/6000.6.7f1/Unity.app/Contents/MacOS/Unity"
 **Build result**
 
 ```text
-[BUILD] Succeeded: Builds/macOS/NeonVelocity.app (116.8 MiB)
+[BUILD] Succeeded: Builds/macOS/NeonVelocity.app (116.9 MiB)
 Build Finished, Result: Success.
 ```
 
@@ -157,6 +160,11 @@ The app is ad-hoc signed (`Signature=adhoc`) and has no Developer ID or notarisa
 3. **Shader pinning** — runtime-created materials now instantiate six URP material templates under `Assets/Game/Resources/Materials/` (lit opaque/transparent, unlit opaque/transparent/additive, particles additive). This keeps URP/Lit and URP/Unlit out of player shader stripping.
 4. **Post-processing shaders** — URP's unused-post-processing-resource stripping removed Bloom, DoF, motion blur and Panini shaders even though the game builds its volume profile at runtime. The project now retains those resources and also lists the hidden shaders as always-included.
 5. **Input System** — replaced the last legacy `UnityEngine.Input.GetKeyDown` pause check with Input System keyboard/gamepad reads, eliminating per-frame `InvalidOperationException`s.
+6. **Track mesh in the player** — the two-stage `Mesh.CombineMeshes` path produced zeroed vertex positions in the macOS player, so the generated road and city were frustum-culled. `DecorMeshBuilder` now copies and transforms vertex/triangle/normal/UV streams directly, rebuilds tangents and bounds, and the track renders in the verified player.
+
+### Visual smoke captures
+
+The built player was run with the developer-only `-nv-capture <directory>` switch. The harness captured the main menu and two Practice frames through `ScreenCapture`; the menu title, runner card, wet title platform and the in-game road, sidewalks, skyline, neon strips, rain and HUD were all visible. This confirms the generated world is present in a player build and that the earlier zero-vertex track regression is fixed. It is a visual smoke check, not a full manual playthrough or a claim that every effect, animation and mode has been reviewed.
 
 ## 8. Static project integrity
 
@@ -169,13 +177,13 @@ python3 Tools/validate_project.py
 **Result**
 
 ```text
-[meta] 104 assets, 104 unique GUIDs
+[meta] 108 assets, 108 unique GUIDs
 [scene] build GUID b8e4b52cd50888fb8d01b634add84552
 [branding] RK VANTAGE GAMES / NEON VELOCITY / games.rkvantage.neonvelocity
 [audio] 21 mono PCM clips, 64.4s total
-[sources] 45 runtime/editor scripts, 3 Unity test scripts
+[sources] 46 runtime/editor scripts, 3 Unity test scripts
 [docs] required documentation present
-PASS: 630 checks
+PASS: 646 checks
 ```
 
 The validator checks meta/GUID integrity, build-scene configuration, empty boot scene, branding, orientation, Input System, colour space, Android settings, audio format, source markers and required documentation.
@@ -184,7 +192,7 @@ The validator checks meta/GUID integrity, build-scene configuration, empty boot 
 
 | Gap | Reason |
 |---|---|
-| Full manual playthrough of all 11 modes | Not completed; PlayMode covers only Practice |
+| Full manual playthrough of all 11 modes | Not completed; PlayMode covers Practice plus a jump regression |
 | Every power-up, pickup, upgrade, collision and result path | Not individually exercised at runtime |
 | Two- and five-client races with real Unity clients | Backend loopback tests only; no multi-client Unity run |
 | Reconnect/disconnect on real clients | Server logic tested; client UI path not exercised |
@@ -205,7 +213,7 @@ The validator checks meta/GUID integrity, build-scene configuration, empty boot 
 # 2. 9 authority integration tests
 python3 -m unittest discover -s Backend/tests -v
 
-# 3. 630 static checks
+# 3. 646 static checks
 python3 Tools/validate_project.py
 
 # 4. Unity EditMode tests
@@ -213,7 +221,7 @@ UNITY="/Applications/Unity/Hub/Editor/6000.6.7f1/Unity.app/Contents/MacOS/Unity"
 "$UNITY" -batchmode -projectPath "$PWD" -runTests -testPlatform EditMode \
   -testResults /tmp/nv-editmode.xml -logFile /tmp/nv-editmode.log
 
-# 5. Unity PlayMode smoke test
+# 5. Unity PlayMode tests
 "$UNITY" -batchmode -projectPath "$PWD" -runTests -testPlatform PlayMode \
   -testResults /tmp/nv-playmode.xml -logFile /tmp/nv-playmode.log
 

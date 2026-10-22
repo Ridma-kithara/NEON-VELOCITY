@@ -153,6 +153,8 @@ namespace NeonVelocity.Effects
             var velocity = _speedLines.velocityOverLifetime;
             velocity.enabled = true;
             velocity.space = ParticleSystemSimulationSpace.Local;
+            velocity.x = new ParticleSystem.MinMaxCurve(0f, 0f);
+            velocity.y = new ParticleSystem.MinMaxCurve(0f, 0f);
             velocity.z = new ParticleSystem.MinMaxCurve(-18f, -26f);
             var renderer = go.GetComponent<ParticleSystemRenderer>();
             renderer.material = MaterialLibrary.Additive(color);

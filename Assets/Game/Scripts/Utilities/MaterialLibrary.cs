@@ -121,6 +121,25 @@ namespace NeonVelocity.Utilities
             return mat;
         }
 
+        /// <summary>Additive particle material with a soft generated sprite (mist, splashes).</summary>
+        public static Material ParticleTextured(string key, Texture texture, Color tint, Vector2 tiling)
+        {
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+            var mat = FromTemplate("NV_Particles_Additive", ParticleShader);
+            mat.name = key;
+            mat.mainTexture = texture;
+            mat.mainTextureScale = tiling;
+            SafeSetColor(mat, "_BaseColor", tint);
+            SafeSetColor(mat, "_Color", tint);
+            if (mat.HasProperty("_BaseMap"))
+            {
+                mat.SetTexture("_BaseMap", texture);
+                mat.SetTextureScale("_BaseMap", tiling);
+            }
+            Cache[key] = mat;
+            return mat;
+        }
+
         public static Material Additive(Color color)
         {
             string key = $"add:{ColorUtility.ToHtmlStringRGBA(color)}";
@@ -176,6 +195,69 @@ namespace NeonVelocity.Utilities
             if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", texture);
             if (mat.HasProperty("_BaseMap")) mat.SetTextureScale("_BaseMap", tiling);
             mat.mainTextureScale = tiling;
+            Cache[key] = mat;
+            return mat;
+        }
+
+        /// <summary>
+        /// Lit material with a generated albedo/normal map. The normal-map template is created
+        /// by BuildTools so the _NORMALMAP variant survives URP shader stripping in a player.
+        /// </summary>
+        public static Material LitTextured(string key, Texture texture, Color tint, float metallic,
+            float smoothness, Vector2 tiling, Texture normal = null, Vector2? normalTiling = null,
+            float normalScale = 1f)
+        {
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+            var mat = FromTemplate(normal != null ? "NV_Lit_Normal" : "NV_Lit_Opaque", LitShader);
+            mat.name = key;
+            mat.mainTexture = texture;
+            mat.mainTextureScale = tiling;
+            SafeSetColor(mat, "_BaseColor", tint);
+            SafeSetColor(mat, "_Color", tint);
+            SafeSetFloat(mat, "_Metallic", metallic);
+            SafeSetFloat(mat, "_Smoothness", smoothness);
+            SafeSetFloat(mat, "_Glossiness", smoothness);
+            if (mat.HasProperty("_BaseMap"))
+            {
+                mat.SetTexture("_BaseMap", texture);
+                mat.SetTextureScale("_BaseMap", tiling);
+            }
+            if (normal != null)
+            {
+                mat.EnableKeyword("_NORMALMAP");
+                if (mat.HasProperty("_BumpMap"))
+                {
+                    mat.SetTexture("_BumpMap", normal);
+                    mat.SetTextureScale("_BumpMap", normalTiling ?? tiling);
+                }
+                SafeSetFloat(mat, "_BumpScale", normalScale);
+            }
+            else
+            {
+                mat.DisableKeyword("_NORMALMAP");
+            }
+            Cache[key] = mat;
+            return mat;
+        }
+
+        /// <summary>Additive unlit texture used for cloud shells and mist/light cards.</summary>
+        public static Material UnlitAdditiveTextured(string key, Texture texture, Color tint, Vector2 tiling,
+            bool insideDome = false, int queueOffset = 0)
+        {
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+            var mat = FromTemplate("NV_Unlit_Additive", UnlitShader);
+            mat.name = key;
+            mat.mainTexture = texture;
+            mat.mainTextureScale = tiling;
+            SafeSetColor(mat, "_BaseColor", tint);
+            SafeSetColor(mat, "_Color", tint);
+            if (mat.HasProperty("_BaseMap"))
+            {
+                mat.SetTexture("_BaseMap", texture);
+                mat.SetTextureScale("_BaseMap", tiling);
+            }
+            SafeSetFloat(mat, "_Cull", insideDome ? 1f : 0f);
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent + 10 + queueOffset;
             Cache[key] = mat;
             return mat;
         }

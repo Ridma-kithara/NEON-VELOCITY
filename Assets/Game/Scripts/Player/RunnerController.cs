@@ -46,6 +46,7 @@ namespace NeonVelocity.Player
         public bool IsDead { get; private set; }
         public bool IsGrounded => _grounded;
         public bool IsSliding => _slideTimer > 0f;
+        public float Height => _y;
         public int ShieldCharges => _shieldCharges;
         public int HoverboardCharges => _hoverboardCharges;
         public float PreferredTimeScale => _slowMotionTimer > 0f && !GameModes.IsOnline(Mode.Id) ? 0.64f : 1f;
@@ -89,6 +90,8 @@ namespace NeonVelocity.Player
         private float _y;
         private float _vy;
         private bool _grounded = true;
+        private float _jumpBufferTimer;
+        private float _coyoteTimer;
         private float _slideTimer;
         private float _invincibleTimer;
         private float _multiplierTimer;
@@ -224,16 +227,23 @@ namespace NeonVelocity.Player
             {
                 Elapsed += dt;
                 Advance(dt);
-                ResolveCollisions();
-                ResolvePickups(dt);
             }
             else
             {
                 UpdateIdleMotion(dt);
             }
 
+            // Vertical and lateral motion are resolved before hazards are swept. A jump press
+            // therefore raises the hitbox in the same frame it is registered, which matters at
+            // top speed where the runner can cover more than half a metre per rendered frame.
             UpdateLane(dt);
             UpdateVertical(dt);
+            if (Running)
+            {
+                ResolveCollisions();
+                ResolvePickups(dt);
+            }
+
             transform.position = new Vector3(_x, _y, PlayerZ);
             if (Visuals != null)
             {
@@ -301,21 +311,33 @@ namespace NeonVelocity.Player
 
         private void UpdateVertical(float dt)
         {
+            if (_jumpBufferTimer > 0f) _jumpBufferTimer = Mathf.Max(0f, _jumpBufferTimer - dt);
+            if (_grounded) _coyoteTimer = 0.11f;
+            else _coyoteTimer = Mathf.Max(0f, _coyoteTimer - dt);
+
+            // Consume a buffered press as soon as the runner can leave the ground. This makes
+            // presses during the last few centimetres of a landing count instead of vanishing.
+            if (_jumpBufferTimer > 0f && _vy <= 0f && (_grounded || _coyoteTimer > 0f))
+                TryJump();
+
             if (_grounded && _slideTimer <= 0f && _vy <= 0f) return;
             _vy -= Config.gravity * dt;
             _y += _vy * dt;
             if (_slideTimer > 0f) _slideTimer -= dt;
             if (_y <= 0f)
             {
-                if (!_grounded)
+                bool wasAirborne = !_grounded;
+                _y = 0f;
+                _vy = 0f;
+                _grounded = true;
+                _coyoteTimer = 0.11f;
+                if (wasAirborne)
                 {
                     App.Audio.PlaySfx("sfx_land", 0.55f);
                     _vfx?.Dust(new Vector3(_x, 0.05f, PlayerZ), Palette.Cyan, 5);
                 }
-                _y = 0f;
-                _vy = 0f;
-                _grounded = true;
                 if (_airJumpTimer > 0f) _airCharges = 1;
+                if (_jumpBufferTimer > 0f) TryJump();
             }
             else _grounded = false;
         }
@@ -335,29 +357,46 @@ namespace NeonVelocity.Player
         private void RequestJump()
         {
             if (!Running) return;
-            if (_grounded)
+            _jumpBufferTimer = 0.16f;
+            TryJump();
+        }
+
+        private bool TryJump()
+        {
+            if (_grounded || _coyoteTimer > 0f)
             {
                 _vy = Config.jumpVelocity;
                 _grounded = false;
+                _jumpBufferTimer = 0f;
+                _coyoteTimer = 0f;
                 _slideTimer = 0f;
                 Jumps++;
                 App.Audio.PlaySfx("sfx_jump", 0.65f);
                 _vfx?.Dust(new Vector3(_x, 0.04f, PlayerZ), Palette.Cyan, 6);
+                return true;
             }
-            else if (_airCharges > 0)
+            if (_airCharges > 0)
             {
                 _airCharges--;
                 _vy = Config.jumpVelocity * 0.92f;
+                _jumpBufferTimer = 0f;
                 Jumps++;
                 App.Audio.PlaySfx("sfx_jump", 0.5f);
                 _vfx?.Burst(new Vector3(_x, _y + 1f, PlayerZ), Palette.Cyan, 10, 0.2f);
+                return true;
             }
+            return false;
         }
 
         private void ReleaseJump()
         {
-            if (!Running) return;
-            if (!_grounded && _vy > 0f) _vy *= 0.58f;
+            if (!Running || _grounded || _vy <= 0f) return;
+            // Variable-height jumps must still clear the 0.99 m low barrier even when the key
+            // is tapped for only one frame. Previously a tap cut the launch velocity by 42%,
+            // producing a 0.60 m hop that visually landed on top of the barrier.
+            float minimumClearVelocity = Mathf.Sqrt(2f * Mathf.Max(1f, Config.gravity) * 1.32f);
+            if (_vy <= minimumClearVelocity) return;
+            _vy = Mathf.Max(minimumClearVelocity, _vy * 0.7f);
         }
 
         private void RequestSlide()

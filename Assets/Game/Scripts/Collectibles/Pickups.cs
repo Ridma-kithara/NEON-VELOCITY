@@ -233,7 +233,7 @@ namespace NeonVelocity.Collectibles
             var root = new GameObject(prism ? "PrismShard" : "EnergyCredit");
             root.transform.SetParent(_container, false);
             Color color = prism ? Palette.Violet : Palette.Cyan;
-            Material core = MaterialLibrary.Lit(color, 0.2f, 0.9f, color, prism ? 4.2f : 2.8f);
+            Material core = MaterialLibrary.Lit(color, 0.2f, 0.9f, color, prism ? 2.2f : 1.45f);
             Material ring = MaterialLibrary.Additive(color);
             var spin = new GameObject("Spin").transform;
             spin.SetParent(root.transform, false);
@@ -254,8 +254,8 @@ namespace NeonVelocity.Collectibles
             var root = new GameObject("PowerUp_" + def.id);
             root.transform.SetParent(_container, false);
             Color color = def.color;
-            Material core = MaterialLibrary.Lit(Color.Lerp(color, Color.white, 0.18f), 0.4f, 0.9f, color, 4f);
-            Material ring = MaterialLibrary.Lit(color, 0.2f, 0.8f, color, 3f);
+            Material core = MaterialLibrary.Lit(Color.Lerp(color, Color.white, 0.18f), 0.4f, 0.9f, color, 2.4f);
+            Material ring = MaterialLibrary.Lit(color, 0.2f, 0.8f, color, 1.8f);
             Material dark = MaterialLibrary.Lit(Palette.DeepPanel, 0.8f, 0.6f);
             var spin = new GameObject("Spin").transform;
             spin.SetParent(root.transform, false);

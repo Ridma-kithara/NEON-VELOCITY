@@ -46,20 +46,20 @@ namespace NeonVelocity.UI
             UITheme.Anchor((RectTransform)studio.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
                 new Vector2(48f, -58f), new Vector2(-40f, -22f));
 
-            var title = UITheme.Label(rail.transform, "Title", "NEON\nVELOCITY", 82, UITheme.White,
+            var title = UITheme.Label(rail.transform, "Title", "NEON\nVELOCITY", 76, UITheme.White,
                 TextAnchor.UpperLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)title.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-                new Vector2(44f, -222f), new Vector2(-40f, -66f));
+                new Vector2(44f, -252f), new Vector2(-40f, -64f));
             UITheme.AddShadow(title, new Color(0f, 0f, 0f, 0.65f), new Vector2(2f, -4f));
 
             var tagline = UITheme.Label(rail.transform, "Tagline", "OUTRUN THE BLACKOUT.", UITheme.BodySize,
                 UITheme.Magenta, TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)tagline.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-                new Vector2(48f, -262f), new Vector2(-40f, -228f));
+                new Vector2(48f, -292f), new Vector2(-40f, -258f));
 
             var season = UITheme.Img(rail.transform, "Season", UITheme.PanelSoft, UITheme.Rounded, false);
             UITheme.Anchor((RectTransform)season.transform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(48f, -320f), new Vector2(302f, -274f));
+                new Vector2(48f, -350f), new Vector2(302f, -304f));
             var seasonText = UITheme.Label(season.transform, "Label", "SEASON 01  //  NEON MONSOON",
                 UITheme.SmallSize, UITheme.Lime, TextAnchor.MiddleCenter, FontStyle.Bold);
             UITheme.Stretch((RectTransform)seasonText.transform, 8f, 3f, 8f, 3f);
@@ -88,9 +88,9 @@ namespace NeonVelocity.UI
         {
             var menu = UITheme.NewRect(root, "Menu");
             UITheme.Anchor(menu, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(48f, -880f), new Vector2(560f, -336f));
+                new Vector2(48f, -878f), new Vector2(560f, -360f));
             var layout = menu.gameObject.AddComponent<VerticalLayoutGroup>();
-            layout.spacing = 9f;
+            layout.spacing = 7f;
             layout.childControlHeight = true;
             layout.childControlWidth = true;
             layout.childForceExpandHeight = false;
@@ -110,7 +110,7 @@ namespace NeonVelocity.UI
                 () => _app.ShowSettings(false));
 
             var bottomRow = UITheme.NewRect(menu, "Bottom Row");
-            UITheme.Layout(bottomRow.gameObject, 54f, -1f, 54f);
+            UITheme.Layout(bottomRow.gameObject, 50f, -1f, 50f);
             var tutorial = UITheme.Button(bottomRow, "Tutorial", "FIRST CONTACT", UITheme.Lime,
                 () => { _app.Audio.PlayUiClick(); _app.StartMode(GameModeId.Tutorial); }, UITheme.SmallSize);
             UITheme.Anchor((RectTransform)tutorial.transform, new Vector2(0f, 0f), new Vector2(0.6f, 1f),
@@ -128,7 +128,7 @@ namespace NeonVelocity.UI
                 _app.Audio.PlayUiClick();
                 action();
             });
-            UITheme.Layout(button.gameObject, 70f, -1f, 70f);
+            UITheme.Layout(button.gameObject, 68f, -1f, 68f);
         }
 
         private void BuildProfile(RectTransform root)

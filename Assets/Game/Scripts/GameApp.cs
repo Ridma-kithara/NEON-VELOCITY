@@ -89,6 +89,9 @@ namespace NeonVelocity
             ShowMainMenu();
             Audio.PlayMusic("music_menu", 0.5f);
             Audio.PlayAmbience("ambience_city", 0.35f);
+
+            if (Array.IndexOf(Environment.GetCommandLineArgs(), "-nv-capture") >= 0)
+                gameObject.AddComponent<VisualCaptureRunner>();
         }
 
         private void Start()

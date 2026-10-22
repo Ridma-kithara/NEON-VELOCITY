@@ -122,12 +122,29 @@ namespace NeonVelocity.EditorTools
             const string folder = resources + "/Materials";
             if (!AssetDatabase.IsValidFolder(folder))
                 AssetDatabase.CreateFolder(resources, "Materials");
+            Texture2D flatNormal = EnsureFlatNormalTexture();
 
             EnsureTemplate(folder + "/NV_Lit_Opaque.mat", "Universal Render Pipeline/Lit", m =>
             {
                 m.SetColor("_BaseColor", Color.white);
                 m.SetFloat("_Metallic", 0.2f);
                 m.SetFloat("_Smoothness", 0.6f);
+                m.EnableKeyword("_EMISSION");
+                m.SetColor("_EmissionColor", new Color(0.01f, 0.01f, 0.01f, 1f));
+                m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+            });
+            EnsureTemplate(folder + "/NV_Lit_Normal.mat", "Universal Render Pipeline/Lit", m =>
+            {
+                m.SetColor("_BaseColor", Color.white);
+                m.SetFloat("_Metallic", 0.1f);
+                m.SetFloat("_Smoothness", 0.65f);
+                m.EnableKeyword("_NORMALMAP");
+                if (flatNormal != null)
+                {
+                    m.SetTexture("_BumpMap", flatNormal);
+                    m.SetTextureScale("_BumpMap", Vector2.one);
+                }
+                m.SetFloat("_BumpScale", 1f);
                 m.EnableKeyword("_EMISSION");
                 m.SetColor("_EmissionColor", new Color(0.01f, 0.01f, 0.01f, 1f));
                 m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
@@ -156,6 +173,35 @@ namespace NeonVelocity.EditorTools
                 MakeTransparent(m, UnityEngine.Rendering.BlendMode.SrcAlpha,
                     UnityEngine.Rendering.BlendMode.One, true);
             });
+        }
+
+        /// <summary>
+        /// Pins a flat normal texture into the Resources normal-map template. The runtime then
+        /// swaps in biome-specific normal maps without relying on a shader variant that would
+        /// otherwise be stripped from the player build.
+        /// </summary>
+        private static Texture2D EnsureFlatNormalTexture()
+        {
+            const string folder = "Assets/Game/Resources/Textures";
+            const string path = folder + "/NV_FlatNormal.asset";
+            if (!AssetDatabase.IsValidFolder(folder))
+                AssetDatabase.CreateFolder("Assets/Game/Resources", "Textures");
+            var existing = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            if (existing != null) return existing;
+
+            var texture = new Texture2D(4, 4, TextureFormat.RGBA32, false, true)
+            {
+                name = "NV_FlatNormal",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear
+            };
+            var pixels = new Color32[16];
+            for (int i = 0; i < pixels.Length; i++) pixels[i] = new Color32(128, 128, 255, 255);
+            texture.SetPixels32(pixels);
+            texture.Apply(false, false);
+            AssetDatabase.CreateAsset(texture, path);
+            Debug.Log($"[BUILD] Created flat normal map {path}.");
+            return texture;
         }
 
         private static void MakeTransparent(Material material, UnityEngine.Rendering.BlendMode source,

@@ -8,8 +8,11 @@ namespace NeonVelocity.Player
 {
     /// <summary>
     /// Normalises keyboard, gamepad and touch into four abstract runner actions.
-    /// Swipes are resolved proportional to the configurable sensitivity setting.
+    /// Swipes are resolved proportional to the configurable sensitivity setting. The negative
+    /// execution order guarantees a jump press is seen by the runner in the same frame, rather
+    /// than being delayed by the arbitrary default ordering of MonoBehaviour.Update.
     /// </summary>
+    [DefaultExecutionOrder(-200)]
     public sealed class InputRouter : MonoBehaviour
     {
         public bool Enabled { get; set; } = true;

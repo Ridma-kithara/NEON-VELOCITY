@@ -2,7 +2,7 @@
 
 **Project:** NEON VELOCITY  
 **Studio:** RK VANTAGE GAMES  
-**Document date:** 22 October 2026  
+**Document date:** 23 October 2026
 **Scope:** source tree as delivered in this repository, version 1.0.0
 
 This note records where the project's code, audio, visuals, fonts, packages and generated
@@ -183,7 +183,7 @@ Before publishing a build or store listing:
 ## 8. Audit status
 
 - The original-source and no-third-party-asset statements above were checked against the
-  delivered tree on 22 October 2026.
+  delivered tree on 23 October 2026.
 - `Tools/validate_project.py` confirms 21 mono 16-bit 22.05 kHz WAVs, unique `.meta` GUIDs,
   the single boot scene and consistent RK VANTAGE GAMES / NEON VELOCITY branding.
 - Unity's own package licences, engine notices and font terms should be reviewed against the

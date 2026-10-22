@@ -150,7 +150,7 @@ namespace NeonVelocity.UI
             out Image fill, Vector2 offsetMin, Vector2 offsetMax)
         {
             var bg = UITheme.Img(parent, name, new Color(0.1f, 0.16f, 0.24f, 0.95f), UITheme.Rounded, false);
-            UITheme.Anchor((RectTransform)bg.transform, Vector2.zero, Vector2.one, offsetMin, offsetMax);
+            UITheme.Anchor((RectTransform)bg.transform, new Vector2(0f, 0f), new Vector2(1f, 0f), offsetMin, offsetMax);
             fill = UITheme.Img(bg.transform, "Fill", accent, UITheme.Rounded, false);
             var rect = (RectTransform)fill.transform;
             rect.anchorMin = Vector2.zero;

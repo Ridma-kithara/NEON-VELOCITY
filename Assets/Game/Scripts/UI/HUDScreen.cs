@@ -48,6 +48,8 @@ namespace NeonVelocity.UI
         private Coroutine _bannerRoutine;
         private Coroutine _flashRoutine;
         private float _creditsPulse;
+        private int _pendingEnergy;
+        private float _energyToastTimer;
 
         public static HUDScreen Build(RectTransform parent, GameApp app)
         {
@@ -318,6 +320,18 @@ namespace NeonVelocity.UI
                 if (_creditsPulse <= 0.001f) _credits.transform.localScale = Vector3.one;
             }
 
+            if (_pendingEnergy > 0)
+            {
+                _energyToastTimer -= Time.unscaledDeltaTime;
+                if (_energyToastTimer <= 0f)
+                {
+                    if (_app != null)
+                        _app.UI.Toast("+" + _pendingEnergy + " ENERGY", UITheme.Amber, 0.55f);
+                    _pendingEnergy = 0;
+                    _energyToastTimer = 0.55f;
+                }
+            }
+
             _refreshTimer -= Time.unscaledDeltaTime;
             if (_session.IsOnline && _refreshTimer <= 0f)
             {
@@ -453,7 +467,7 @@ namespace NeonVelocity.UI
         public void PulseCredits(int amount)
         {
             _creditsPulse = 1f;
-            if (_app != null) _app.UI.Toast("+" + amount + " ENERGY", UITheme.Amber, 0.9f);
+            _pendingEnergy += amount;
         }
 
         public void Toast(string message, Color color)

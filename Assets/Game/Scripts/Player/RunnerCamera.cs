@@ -20,11 +20,14 @@ namespace NeonVelocity.Player
         private float _time;
         private bool _reducedMotion;
         private bool _shakeEnabled;
-        private float _fovBase = 62f;
+        private float _fovBase = 59f;
+        private float _graphicsScale = 2f;
         private Color _neon = Palette.Cyan;
         private Bloom _bloom;
         private Vignette _vignette;
         private ChromaticAberration _chroma;
+        private MotionBlur _motionBlur;
+        private FilmGrain _filmGrain;
 
         public static RunnerCamera Create(Transform parent, RunnerController runner, bool reducedMotion, bool shakeEnabled,
             float graphicsScale)
@@ -42,39 +45,55 @@ namespace NeonVelocity.Player
             _runner = runner;
             _reducedMotion = reducedMotion;
             _shakeEnabled = shakeEnabled;
+            _graphicsScale = graphicsScale;
             Camera = gameObject.AddComponent<Camera>();
             Camera.clearFlags = CameraClearFlags.SolidColor;
             Camera.backgroundColor = Palette.Hex("#06101F");
-            Camera.nearClipPlane = 0.12f;
-            Camera.farClipPlane = 420f;
+            Camera.nearClipPlane = 0.09f;
+            Camera.farClipPlane = 620f;
             Camera.allowHDR = true;
             Camera.allowMSAA = true;
             Camera.fieldOfView = _fovBase;
             gameObject.AddComponent<AudioListener>();
-            gameObject.transform.position = new Vector3(0f, 4.2f, -6.4f);
+            gameObject.transform.position = new Vector3(0f, 3.8f, -7.2f);
 
             var data = Camera.GetUniversalAdditionalCameraData();
             data.renderPostProcessing = true;
-            data.antialiasing = graphicsScale >= 2f ? AntialiasingMode.SubpixelMorphologicalAntiAliasing : AntialiasingMode.None;
-            data.antialiasingQuality = AntialiasingQuality.Medium;
+            data.antialiasing = graphicsScale >= 2f
+                ? AntialiasingMode.SubpixelMorphologicalAntiAliasing
+                : (graphicsScale >= 1f ? AntialiasingMode.FastApproximateAntialiasing : AntialiasingMode.None);
+            data.antialiasingQuality = AntialiasingQuality.High;
             data.renderShadows = graphicsScale >= 1f;
 
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
             profile.name = "NV Gameplay Post";
+            var tonemapping = profile.Add<Tonemapping>(true);
+            tonemapping.mode.Override(TonemappingMode.ACES);
             _bloom = profile.Add<Bloom>(true);
-            _bloom.intensity.Override(graphicsScale >= 1f ? 0.9f : 0.35f);
-            _bloom.threshold.Override(0.82f);
-            _bloom.scatter.Override(0.68f);
+            _bloom.intensity.Override(graphicsScale >= 1f ? 0.56f : 0.3f);
+            _bloom.threshold.Override(0.96f);
+            _bloom.scatter.Override(0.66f);
+            _bloom.highQualityFiltering.Override(graphicsScale >= 2f);
             _vignette = profile.Add<Vignette>(true);
-            _vignette.intensity.Override(0.34f);
-            _vignette.smoothness.Override(0.52f);
+            _vignette.intensity.Override(0.37f);
+            _vignette.smoothness.Override(0.56f);
             _vignette.color.Override(Palette.Hex("#03050B"));
             _chroma = profile.Add<ChromaticAberration>(true);
-            _chroma.intensity.Override(0.13f);
+            _chroma.intensity.Override(reducedMotion ? 0.025f : 0.085f);
             var grade = profile.Add<ColorAdjustments>(true);
-            grade.postExposure.Override(0.12f);
-            grade.contrast.Override(14f);
-            grade.saturation.Override(17f);
+            grade.postExposure.Override(0.18f);
+            grade.contrast.Override(8f);
+            grade.saturation.Override(5f);
+            grade.colorFilter.Override(new Color(0.94f, 0.98f, 1f));
+            _filmGrain = profile.Add<FilmGrain>(true);
+            _filmGrain.type.Override(FilmGrainLookup.Thin1);
+            _filmGrain.intensity.Override(reducedMotion ? 0f : (graphicsScale >= 2f ? 0.16f : 0.08f));
+            _filmGrain.response.Override(0.74f);
+            _motionBlur = profile.Add<MotionBlur>(true);
+            _motionBlur.mode.Override(MotionBlurMode.CameraOnly);
+            _motionBlur.quality.Override(MotionBlurQuality.Medium);
+            _motionBlur.intensity.Override(reducedMotion || graphicsScale < 2f ? 0f : 0.16f);
+            _motionBlur.clamp.Override(0.045f);
             var volumeGo = new GameObject("Gameplay Volume");
             volumeGo.transform.SetParent(transform, false);
             Volume = volumeGo.AddComponent<Volume>();
@@ -94,7 +113,7 @@ namespace NeonVelocity.Player
         public void SetBiomeColor(Color color)
         {
             _neon = color;
-            if (_chroma != null) _chroma.intensity.Override(_reducedMotion ? 0.04f : 0.13f);
+            if (_chroma != null) _chroma.intensity.Override(_reducedMotion ? 0.025f : 0.085f);
         }
 
         private void LateUpdate()
@@ -105,19 +124,25 @@ namespace NeonVelocity.Player
             float speedNorm = _runner.SpeedNormalised;
             Vector3 runnerPos = _runner.transform.position;
             float z = runnerPos.z;
-            float x = Mathf.Lerp(transform.position.x, runnerPos.x * 0.62f, 1f - Mathf.Exp(-dt * 8f));
-            float height = 4.15f + speedNorm * 0.35f;
-            float back = 6.7f + speedNorm * 1.1f;
+
+            // Lower, closer chase framing with a slight shoulder offset reads more like a film
+            // camera and lets the wet road and rain pass through the foreground.
+            float shoulder = 0.45f + Mathf.Sin(_time * 0.17f) * 0.12f;
+            float x = Mathf.Lerp(transform.position.x, runnerPos.x * 0.74f + shoulder, 1f - Mathf.Exp(-dt * 8f));
+            float height = 3.58f + speedNorm * 0.32f;
+            float back = 7.35f + speedNorm * 1.25f;
             Vector3 desired = new Vector3(x, height, z - back);
             transform.position = Vector3.Lerp(transform.position, desired, 1f - Mathf.Exp(-dt * 7f));
 
-            Vector3 lookAt = new Vector3(runnerPos.x * 0.25f, runnerPos.y + 1.45f, z + 15f + speedNorm * 6f);
+            Vector3 lookAt = new Vector3(runnerPos.x * 0.24f, runnerPos.y + 1.36f, z + 17f + speedNorm * 6f);
             Quaternion rotation = Quaternion.LookRotation(lookAt - transform.position, Vector3.up);
+            float roll = _reducedMotion ? 0f : Mathf.Clamp((runnerPos.x - x) * -2.1f, -2.8f, 2.8f);
+            rotation *= Quaternion.Euler(0f, 0f, roll);
             transform.rotation = Quaternion.Slerp(transform.rotation, rotation, 1f - Mathf.Exp(-dt * 6f));
 
             if (_shake > 0.001f)
             {
-                float amplitude = _shake * 0.22f;
+                float amplitude = _shake * 0.2f;
                 transform.position += new Vector3(
                     (Mathf.PerlinNoise(_time * 28f, 0.4f) - 0.5f) * amplitude,
                     (Mathf.PerlinNoise(0.2f, _time * 31f) - 0.5f) * amplitude,
@@ -125,11 +150,13 @@ namespace NeonVelocity.Player
                 _shake = Mathf.Max(0f, _shake - dt * 2.8f);
             }
 
-            float targetFov = _fovBase + speedNorm * 10f + (_runner.IsSliding ? 2f : 0f);
+            float targetFov = _fovBase + speedNorm * 9f + (_runner.IsSliding ? 2f : 0f);
             if (_reducedMotion) targetFov = _fovBase + speedNorm * 3f;
             Camera.fieldOfView = Mathf.Lerp(Camera.fieldOfView, targetFov, 1f - Mathf.Exp(-dt * 3f));
-            if (_bloom != null) _bloom.intensity.Override(_reducedMotion ? 0.45f : (0.8f + speedNorm * 0.5f));
-            if (_vignette != null) _vignette.intensity.Override(_runner.IsDead ? 0.6f : 0.3f + speedNorm * 0.12f);
+            if (_bloom != null) _bloom.intensity.Override(_reducedMotion ? 0.32f : (0.46f + speedNorm * 0.26f));
+            if (_vignette != null) _vignette.intensity.Override(_runner.IsDead ? 0.64f : 0.32f + speedNorm * 0.11f);
+            if (_motionBlur != null && !_reducedMotion && _graphicsScale >= 2f)
+                _motionBlur.intensity.Override(0.1f + speedNorm * 0.22f);
         }
     }
 }

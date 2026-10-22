@@ -19,9 +19,10 @@ namespace NeonVelocity.World
         private Transform _hero;
         private RunnerVisuals _runner;
         private float _time;
-        private readonly List<Transform> _floaters = new List<Transform>();
         private readonly List<Renderer> _pulse = new List<Renderer>();
         private Transform _ring;
+        private Transform _cloudA;
+        private Transform _cloudB;
         private float _orbit;
 
         public Camera Camera => _camera;
@@ -40,27 +41,42 @@ namespace NeonVelocity.World
         {
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
-            RenderSettings.fogDensity = 0.012f;
-            RenderSettings.fogColor = Palette.Hex("#081326");
-            RenderSettings.ambientMode = AmbientMode.Flat;
-            RenderSettings.ambientLight = Palette.Hex("#16243B");
+            RenderSettings.fogDensity = 0.0095f;
+            RenderSettings.fogColor = Palette.Hex("#071120");
+            RenderSettings.ambientMode = AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = Palette.Hex("#0D1C36");
+            RenderSettings.ambientEquatorColor = Palette.Hex("#142B4B");
+            RenderSettings.ambientGroundColor = Palette.Hex("#02050B");
+            RenderSettings.ambientIntensity = 1.05f;
+            RenderSettings.reflectionIntensity = 1f;
+            RenderSettings.defaultReflectionMode = DefaultReflectionMode.Custom;
+            RenderSettings.customReflectionTexture = TextureFactory.ReflectionCubemap("NV_MenuReflection",
+                Palette.Hex("#0A1B36"), Palette.Hex("#183F5C"), Palette.Cyan, 64);
 
             var lightGo = new GameObject("Key Light");
             lightGo.transform.SetParent(transform, false);
             var sun = lightGo.AddComponent<Light>();
             sun.type = LightType.Directional;
-            sun.color = new Color(0.55f, 0.75f, 1f);
-            sun.intensity = 0.9f;
-            sun.transform.rotation = Quaternion.Euler(32f, -35f, 0f);
+            sun.color = new Color(0.62f, 0.8f, 1f);
+            sun.intensity = 1.25f;
+            sun.shadows = LightShadows.Soft;
+            sun.shadowStrength = 0.78f;
+            sun.transform.rotation = Quaternion.Euler(34f, -38f, 0f);
 
             var rimGo = new GameObject("Rim Light");
             rimGo.transform.SetParent(transform, false);
             var rim = rimGo.AddComponent<Light>();
             rim.type = LightType.Directional;
             rim.color = Palette.Magenta;
-            rim.intensity = 0.45f;
+            rim.intensity = 0.55f;
             rim.transform.rotation = Quaternion.Euler(18f, 150f, 0f);
 
+            var fillCyan = CreatePointLight("Hero Cyan Fill", new Vector3(-3.8f, 3.1f, 2.2f), Palette.Cyan, 11f, 10f);
+            fillCyan.transform.SetParent(transform, false);
+            var fillMagenta = CreatePointLight("Hero Magenta Fill", new Vector3(3.9f, 1.9f, 0.6f), Palette.Magenta, 9f, 7f);
+            fillMagenta.transform.SetParent(transform, false);
+
+            BuildSky();
             BuildPlatform();
             BuildSkyline();
             BuildHero(character, trail);
@@ -68,25 +84,117 @@ namespace NeonVelocity.World
             BuildCamera(reducedMotion);
         }
 
+        private static Light CreatePointLight(string name, Vector3 position, Color color, float range, float intensity)
+        {
+            var go = new GameObject(name);
+            go.transform.position = position;
+            var light = go.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.color = color;
+            light.range = range;
+            light.intensity = intensity;
+            light.shadows = LightShadows.None;
+            return light;
+        }
+
+        private void BuildSky()
+        {
+            var skyTexture = TextureFactory.VerticalGradient("NV_MenuSky",
+                Palette.Hex("#153B5D"), Palette.Hex("#020610"), 256);
+            var skyMaterial = MaterialLibrary.UnlitTextured("NV_MenuSkyMat", skyTexture,
+                new Color(0.82f, 0.9f, 1f), new Vector2(1f, 1f));
+            skyMaterial.SetFloat("_Cull", 1f);
+            skyMaterial.renderQueue = 1990;
+
+            var dome = PrimitiveMeshes.Create("Menu Sky Dome", PrimitiveMeshes.Sphere, skyMaterial, transform,
+                Vector3.zero, Vector3.one * 900f);
+            dome.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+
+            // A sparse front-facing star field sits inside the dome but outside the city.
+            var starMat = MaterialLibrary.Lit(Palette.White, 0f, 0.1f,
+                new Color(0.62f, 0.86f, 1f), 2.6f);
+            var rng = new DeterministicRandom(0x51A9);
+            for (int i = 0; i < 48; i++)
+            {
+                float azimuth = rng.Range(-Mathf.PI * 0.62f, Mathf.PI * 0.62f);
+                float elevation = rng.Range(0.12f, 1.1f);
+                var p = new Vector3(
+                    Mathf.Sin(azimuth) * Mathf.Cos(elevation),
+                    Mathf.Sin(elevation),
+                    -Mathf.Cos(azimuth) * Mathf.Cos(elevation)) * 330f;
+                var star = PrimitiveMeshes.Create("Menu Star" + i, PrimitiveMeshes.Cube, starMat, transform,
+                    p, Vector3.one * rng.Range(0.45f, 1.2f));
+                star.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+            }
+
+            var moon = PrimitiveMeshes.Create("Menu Moon", PrimitiveMeshes.Sphere,
+                MaterialLibrary.Lit(new Color(0.82f, 0.9f, 1f), 0f, 1f,
+                    new Color(0.45f, 0.7f, 1f), 4.4f),
+                transform, new Vector3(88f, 122f, -282f), Vector3.one * 17f);
+            moon.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+
+            var cloudMaterial = MaterialLibrary.UnlitAdditiveTextured("NV_MenuClouds",
+                TextureFactory.CloudLayer(7777), new Color(0.48f, 0.67f, 1f, 0.26f),
+                new Vector2(2.5f, 1f), true, 1);
+            _cloudA = CreateCloudShell("Menu Clouds High", 0.91f, cloudMaterial, dome.transform);
+            _cloudB = CreateCloudShell("Menu Clouds Low", 0.8f, cloudMaterial, dome.transform);
+        }
+
+        private Transform CreateCloudShell(string name, float scale, Material material, Transform parent)
+        {
+            var go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.transform.localScale = Vector3.one * scale;
+            var filter = go.AddComponent<MeshFilter>();
+            filter.sharedMesh = PrimitiveMeshes.Sphere;
+            var renderer = go.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
+            return go.transform;
+        }
+
         private static Material Lit(Color color, float metallic = 0.3f, float smooth = 0.6f, Color? emission = null,
             float intensity = 2f) => MaterialLibrary.Lit(color, metallic, smooth, emission, intensity);
 
         private void BuildPlatform()
         {
+            var asphalt = TextureFactory.Asphalt(5150);
+            var normal = TextureFactory.AsphaltNormal(5150);
+            var wetTop = MaterialLibrary.LitTextured("NV_MenuWetTop", asphalt,
+                Color.Lerp(Palette.Panel, Color.white, 0.08f), 0.2f, 0.92f,
+                new Vector2(2f, 4f), normal, new Vector2(2f, 4f), 1.3f);
+            var puddle = Lit(Palette.Hex("#02060C"), 0.95f, 1f);
             var mats = new
             {
                 dark = Lit(Palette.DeepPanel, 0.7f, 0.35f),
-                panel = Lit(Palette.Panel, 0.4f, 0.55f),
+                panel = wetTop,
                 cyan = Lit(Palette.Cyan, 0.2f, 0.8f, Palette.Cyan, 3.4f),
                 magenta = Lit(Palette.Magenta, 0.2f, 0.8f, Palette.Magenta, 2.8f),
                 amber = Lit(Palette.Amber, 0.2f, 0.8f, Palette.Amber, 2.4f),
                 white = Lit(Palette.White, 0.2f, 0.8f, Palette.White, 1.4f)
             };
 
-            PrimitiveMeshes.Box(transform, "Platform", new Vector3(0f, -0.35f, -1.5f),
+            PrimitiveMeshes.Box(transform, "Platform", new Vector3(0f, -0.42f, -1.5f),
                 new Vector3(9f, 0.7f, 16f), mats.dark);
             PrimitiveMeshes.Box(transform, "PlatformTop", new Vector3(0f, 0.02f, -1.5f),
                 new Vector3(8.4f, 0.06f, 15.4f), mats.panel);
+            PrimitiveMeshes.Box(transform, "PlatformUnderGlow", new Vector3(0f, -0.79f, -1.5f),
+                new Vector3(7.8f, 0.04f, 14.8f), mats.cyan);
+            for (int i = 0; i < 5; i++)
+            {
+                float z = -7.4f + i * 3.1f;
+                PrimitiveMeshes.Box(transform, "Puddle" + i,
+                    new Vector3((i % 2 == 0 ? -1f : 1f) * (1.3f + (i % 3) * 0.55f), 0.055f, z),
+                    new Vector3(1.1f + (i % 2) * 0.6f, 0.008f, 1.5f + (i % 3) * 0.4f),
+                    puddle);
+            }
+            for (int i = 0; i < 3; i++)
+            {
+                PrimitiveMeshes.Box(transform, "PlatformSeam" + i,
+                    new Vector3(0f, 0.052f, -7.2f + i * 5.4f),
+                    new Vector3(8.35f, 0.005f, 0.035f), mats.dark);
+            }
             for (int side = -1; side <= 1; side += 2)
             {
                 PrimitiveMeshes.Box(transform, "EdgeGlow" + side, new Vector3(side * 4.2f, 0.09f, -1.5f),
@@ -117,19 +225,6 @@ namespace NeonVelocity.World
                     i % 3 == 0 ? mats.magenta : mats.cyan);
                 seg.transform.localRotation = Quaternion.Euler(0f, 0f, angle * Mathf.Rad2Deg + 90f);
                 seg.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
-            }
-
-            // Floating title glyphs / distinct geometric markers.
-            for (int i = 0; i < 7; i++)
-            {
-                float x = (i % 2 == 0 ? -1f : 1f) * (4.7f + (i % 3) * 1.3f);
-                float y = 1.2f + i * 0.7f;
-                float z = -2f - i * 2.1f;
-                var marker = PrimitiveMeshes.Box(transform, "Marker" + i, new Vector3(x, y, z),
-                    new Vector3(0.42f, 0.42f, 0.06f), i % 2 == 0 ? mats.cyan : mats.amber,
-                    Quaternion.Euler(0f, 0f, 45f));
-                marker.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
-                _floaters.Add(marker.transform);
             }
         }
 
@@ -170,6 +265,26 @@ namespace NeonVelocity.World
                 }
             }
 
+            var signMaterial = MaterialLibrary.UnlitTextured("NV_MenuSignA",
+                TextureFactory.SignBoard(6161, Palette.Cyan, 1),
+                new Color(1.05f, 1.05f, 1.05f, 1f), Vector2.one);
+            var signMaterialB = MaterialLibrary.UnlitTextured("NV_MenuSignB",
+                TextureFactory.SignBoard(8181, Palette.Magenta, 2),
+                new Color(1.05f, 1.05f, 1.05f, 1f), Vector2.one);
+            for (int i = 0; i < 6; i++)
+            {
+                float side = i % 2 == 0 ? -1f : 1f;
+                float x = side * rng.Range(9.5f, 13.5f);
+                float z = -12f - i * 7.5f - rng.Range(0f, 3f);
+                float y = rng.Range(3.4f, 7.5f);
+                var sign = PrimitiveMeshes.Box(transform, "BladeSign" + i,
+                    new Vector3(x, y, z), new Vector3(1.15f, 2.8f, 0.08f),
+                    i % 2 == 0 ? signMaterial : signMaterialB);
+                sign.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
+                PrimitiveMeshes.Box(transform, "SignArm" + i, new Vector3(x + side * 0.45f, y + 1.55f, z),
+                    new Vector3(0.9f, 0.06f, 0.08f), mid);
+            }
+
             // Ground haze panels under the towers.
             for (int i = 0; i < 9; i++)
             {
@@ -183,9 +298,11 @@ namespace NeonVelocity.World
                 renderer.receiveShadows = false;
             }
 
-            // Distant horizon bar gives the infinite city a readable silhouette.
-            PrimitiveMeshes.Box(transform, "Horizon", new Vector3(0f, -0.4f, -86f),
-                new Vector3(190f, 0.8f, 2f), cyan).GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+            // Distant horizon silhouette and a dim reflective ribbon beyond the platform.
+            PrimitiveMeshes.Box(transform, "Horizon", new Vector3(0f, -2f, -86f),
+                new Vector3(190f, 4f, 2f), mid).GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+            PrimitiveMeshes.Box(transform, "HorizonGlow", new Vector3(0f, 0.15f, -85f),
+                new Vector3(190f, 0.05f, 0.12f), cyan).GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
         }
 
         private void BuildHero(CharacterDefinition character, TrailDefinition trail)
@@ -193,7 +310,7 @@ namespace NeonVelocity.World
             var hero = new GameObject("Menu Runner");
             hero.transform.SetParent(transform, false);
             hero.transform.localPosition = new Vector3(0f, 0f, -1.4f);
-            hero.transform.localRotation = Quaternion.Euler(0f, 180f, 0f);
+            hero.transform.localRotation = Quaternion.identity;
             hero.transform.localScale = Vector3.one * 1.35f;
             _hero = hero.transform;
             _runner = hero.AddComponent<RunnerVisuals>();
@@ -229,6 +346,55 @@ namespace NeonVelocity.World
             renderer.shadowCastingMode = ShadowCastingMode.Off;
             renderer.receiveShadows = false;
             ps.Play();
+
+            var rainGo = new GameObject("Menu Rain");
+            rainGo.transform.SetParent(transform, false);
+            rainGo.transform.localPosition = new Vector3(0f, 20f, -28f);
+            var rain = rainGo.AddComponent<ParticleSystem>();
+            var rainMain = rain.main;
+            rainMain.loop = true;
+            rainMain.startLifetime = 1.25f;
+            rainMain.startSpeed = new ParticleSystem.MinMaxCurve(23f, 30f);
+            rainMain.startSize = new ParticleSystem.MinMaxCurve(0.012f, 0.032f);
+            rainMain.startColor = new Color(0.55f, 0.8f, 1f, 0.42f);
+            rainMain.gravityModifier = 1.1f;
+            rainMain.maxParticles = 1000;
+            var rainEmission = rain.emission;
+            rainEmission.rateOverTime = 520f;
+            var rainShape = rain.shape;
+            rainShape.shapeType = ParticleSystemShapeType.Box;
+            rainShape.scale = new Vector3(90f, 1f, 80f);
+            var rainRenderer = rainGo.GetComponent<ParticleSystemRenderer>();
+            rainRenderer.material = MaterialLibrary.Additive(new Color(0.55f, 0.8f, 1f));
+            rainRenderer.renderMode = ParticleSystemRenderMode.Stretch;
+            rainRenderer.lengthScale = 9f;
+            rainRenderer.velocityScale = 0.08f;
+            rainRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            rainRenderer.receiveShadows = false;
+            rain.Play();
+
+            var splashGo = new GameObject("Menu Splashes");
+            splashGo.transform.SetParent(transform, false);
+            splashGo.transform.localPosition = new Vector3(0f, 0.12f, -1.5f);
+            var splash = splashGo.AddComponent<ParticleSystem>();
+            var splashMain = splash.main;
+            splashMain.loop = true;
+            splashMain.startLifetime = 0.3f;
+            splashMain.startSpeed = new ParticleSystem.MinMaxCurve(0.7f, 1.8f);
+            splashMain.startSize = new ParticleSystem.MinMaxCurve(0.018f, 0.05f);
+            splashMain.startColor = new Color(0.65f, 0.9f, 1f, 0.6f);
+            splashMain.maxParticles = 180;
+            var splashEmission = splash.emission;
+            splashEmission.rateOverTime = 90f;
+            var splashShape = splash.shape;
+            splashShape.shapeType = ParticleSystemShapeType.Box;
+            splashShape.scale = new Vector3(8.2f, 0.05f, 15f);
+            var splashRenderer = splashGo.GetComponent<ParticleSystemRenderer>();
+            splashRenderer.material = MaterialLibrary.ParticleTextured("NV_MenuSplash",
+                TextureFactory.RadialGlow(48), new Color(0.65f, 0.9f, 1f, 0.65f), Vector2.one);
+            splashRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            splashRenderer.receiveShadows = false;
+            splash.Play();
         }
 
         private void BuildCamera(bool reducedMotion)
@@ -239,40 +405,61 @@ namespace NeonVelocity.World
             _camera = cameraGo.AddComponent<Camera>();
             _camera.clearFlags = CameraClearFlags.SolidColor;
             _camera.backgroundColor = Palette.Hex("#040916");
-            _camera.fieldOfView = 58f;
-            _camera.nearClipPlane = 0.1f;
-            _camera.farClipPlane = 220f;
+            _camera.fieldOfView = 54f;
+            _camera.nearClipPlane = 0.08f;
+            _camera.farClipPlane = 620f;
             _camera.allowHDR = true;
             _camera.allowMSAA = true;
-            _camera.transform.position = new Vector3(3.1f, 2.7f, 6.6f);
-            _camera.transform.LookAt(new Vector3(0f, 1.65f, -4.2f));
+            _camera.transform.position = new Vector3(2.7f, 2.35f, 6.15f);
+            _camera.transform.LookAt(new Vector3(0f, 1.45f, -4.5f));
             cameraGo.AddComponent<AudioListener>();
 
             var data = _camera.GetUniversalAdditionalCameraData();
             data.renderPostProcessing = true;
+            data.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
+            data.antialiasingQuality = AntialiasingQuality.High;
+            data.renderShadows = true;
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
             profile.name = "NV Menu Post";
+            var tonemapping = profile.Add<Tonemapping>(true);
+            tonemapping.mode.Override(TonemappingMode.ACES);
             var bloom = profile.Add<Bloom>(true);
-            bloom.intensity.Override(0.75f);
-            bloom.threshold.Override(0.85f);
-            bloom.scatter.Override(0.65f);
+            bloom.intensity.Override(0.72f);
+            bloom.threshold.Override(0.95f);
+            bloom.scatter.Override(0.68f);
+            bloom.highQualityFiltering.Override(true);
             var vignette = profile.Add<Vignette>(true);
-            vignette.intensity.Override(0.32f);
-            vignette.smoothness.Override(0.55f);
+            vignette.intensity.Override(0.38f);
+            vignette.smoothness.Override(0.58f);
             vignette.color.Override(Palette.Hex("#040711"));
             var ca = profile.Add<ChromaticAberration>(true);
-            ca.intensity.Override(0.12f);
+            ca.intensity.Override(reducedMotion ? 0.02f : 0.065f);
             var grade = profile.Add<ColorAdjustments>(true);
-            grade.postExposure.Override(0.15f);
-            grade.contrast.Override(12f);
-            grade.saturation.Override(18f);
+            grade.postExposure.Override(0.22f);
+            grade.contrast.Override(9f);
+            grade.saturation.Override(7f);
+            grade.colorFilter.Override(new Color(0.94f, 0.98f, 1f));
+            var grain = profile.Add<FilmGrain>(true);
+            grain.type.Override(FilmGrainLookup.Thin1);
+            grain.intensity.Override(reducedMotion ? 0f : 0.14f);
+            grain.response.Override(0.78f);
+            if (!reducedMotion)
+            {
+                var dof = profile.Add<DepthOfField>(true);
+                dof.mode.Override(DepthOfFieldMode.Bokeh);
+                dof.focusDistance.Override(8.2f);
+                dof.aperture.Override(6.3f);
+                dof.focalLength.Override(58f);
+                dof.bladeCount.Override(5);
+                dof.bladeCurvature.Override(1f);
+            }
             var volumeGo = new GameObject("Menu Volume");
             volumeGo.transform.SetParent(transform, false);
             var volume = volumeGo.AddComponent<Volume>();
             volume.isGlobal = true;
             volume.priority = 2f;
             volume.profile = profile;
-            if (reducedMotion) _camera.fieldOfView = 54f;
+            if (reducedMotion) _camera.fieldOfView = 56f;
         }
 
         public void SetCharacter(CharacterDefinition character, TrailDefinition trail)
@@ -287,24 +474,18 @@ namespace NeonVelocity.World
             _time += Time.unscaledDeltaTime;
             if (_camera != null)
             {
-                _orbit += Time.unscaledDeltaTime * 0.09f;
-                float x = Mathf.Sin(_orbit) * 1.1f;
-                var target = new Vector3(x, 2.7f + Mathf.Sin(_time * 0.24f) * 0.12f, 6.6f);
+                _orbit += Time.unscaledDeltaTime * 0.075f;
+                float x = Mathf.Sin(_orbit) * 0.82f;
+                var target = new Vector3(x, 2.35f + Mathf.Sin(_time * 0.21f) * 0.1f, 6.15f);
                 _camera.transform.position = Vector3.Lerp(_camera.transform.position, target, Time.unscaledDeltaTime * 1.1f);
-                _camera.transform.LookAt(new Vector3(0f, 1.65f, -4.2f));
+                _camera.transform.LookAt(new Vector3(0.25f, 1.45f, -4.5f));
+                _camera.transform.rotation *= Quaternion.Euler(0f, 0f, Mathf.Sin(_time * 0.17f) * 0.45f);
             }
+            if (_cloudA != null) _cloudA.Rotate(0f, Time.unscaledDeltaTime * 0.5f, 0f, Space.Self);
+            if (_cloudB != null) _cloudB.Rotate(0f, Time.unscaledDeltaTime * -0.3f, 0f, Space.Self);
             if (_runner != null)
                 _runner.Tick(Time.unscaledDeltaTime, 0.35f, Mathf.Sin(_time * 0.8f) * 0.4f, RunnerPose.Run);
             if (_ring != null) _ring.Rotate(0f, 0f, Time.unscaledDeltaTime * -3f);
-            for (int i = 0; i < _floaters.Count; i++)
-            {
-                var f = _floaters[i];
-                if (f == null) continue;
-                var p = f.localPosition;
-                p.y += Mathf.Sin(_time * 1.2f + i) * Time.unscaledDeltaTime * 0.12f;
-                f.localPosition = p;
-                f.Rotate(0f, 0f, Time.unscaledDeltaTime * (18f + i * 2f));
-            }
             for (int i = 0; i < _pulse.Count; i++)
             {
                 var renderer = _pulse[i];
