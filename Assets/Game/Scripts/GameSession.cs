@@ -367,7 +367,7 @@ namespace NeonVelocity
         private void OnWorldRebased()
         {
             _remotes.Clear();
-            foreach (var remote in FindObjectsByType<RemoteRunner>(FindObjectsSortMode.None))
+            foreach (var remote in FindObjectsByType<RemoteRunner>(FindObjectsInactive.Exclude))
             {
                 if (remote != null && remote.PlayerId != Net?.PlayerId) Destroy(remote.gameObject);
             }

@@ -35,7 +35,6 @@ namespace NeonVelocity.UI
         private readonly List<GameObject> _toasts = new List<GameObject>();
         private GameObject _modal;
         private Coroutine _fadeRoutine;
-        private float _hudScale = 1f;
 
         public void Initialise(GameApp app)
         {

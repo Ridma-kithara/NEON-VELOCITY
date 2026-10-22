@@ -12,6 +12,7 @@
 # Unity/IDE generated files
 /*.csproj
 /*.sln
+/*.slnx
 *.suo
 *.user
 *.userprefs

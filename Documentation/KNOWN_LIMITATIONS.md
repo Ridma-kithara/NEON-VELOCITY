@@ -2,39 +2,38 @@
 
 This document records what is genuinely complete, what is constrained by the current environment, and what would need further work before a commercial platform release. It should be read together with [TEST_REPORT.md](TEST_REPORT.md).
 
-## 1. Verification limitations (highest priority)
+## 1. Verification status
 
-### Unity editor and runtime are not verified
+### Verified in this environment (22 October 2026)
 
-- There is **no active Unity licence** on the authoring machine. The editor exits with code **198** before importing the project; Unity Hub reported no user entitlements.
-- Consequently:
-  - the project has not been imported by Unity in this state;
-  - no GameObject has been rendered;
-  - no manual or automated Unity EditMode/PlayMode test has executed;
-  - runtime exceptions, missing references, shader issues, serialization behavior and frame rate are unknown.
-- The C# sources compile with **0 errors / 0 warnings** against the installed Unity 6000.6.7f1, URP, Input System, uGUI and TestRunner assemblies, and the test sources compile too. Compilation is not equivalent to a working editor import.
-- `.meta` files and scene/build settings were generated/edited outside Unity. The first licensed import should be treated as the authoritative validation of those files.
+- Unity **6000.6.7f1** imported and compiled the project with **0 errors** after the editor-only assembly boundary was added.
+- **50 / 50** headless gameplay-core tests, **9 / 9** Python authority tests and **630** static checks passed.
+- **19 / 19** Unity EditMode tests passed.
+- **1 / 1** Unity PlayMode smoke test passed: real bootstrap, main menu, title stage, Practice start, a 3.5-second live update window and clean shutdown.
+- A universal **x86_64 + ARM64** macOS player (`Builds/macOS/NeonVelocity.app`, 116.8 MiB) was built and launched. The final Player.log has no shader-stripping errors, Input System exceptions or null-shader crashes.
+- The app is **ad-hoc signed** only; there is no Developer ID, hardened runtime or notarisation.
 
-### No platform builds exist
+### Still unverified
 
-No player build for any target has been produced, launched or signed in this environment.
+- A full manual playthrough of all 11 modes, every power-up, collision, pickup, result and persistence path.
+- Two- and five-client races with real Unity clients; reconnect/disconnect through the game UI.
+- Windows, Linux, WebGL, Android and iOS player builds.
+- Real-device touch, gamepad, audio, suspend/resume and performance.
+- Frame time, memory, battery and thermal profiling.
+- Public-internet deployment, TLS, signing, notarisation and store packaging.
+
+### Platform build status
 
 | Target | Offline | Online (native TCP) | Build status |
 |---|---|---|---|
-| macOS | Implemented | Implemented | Not built (licence missing; module installed) |
-| Windows 64-bit | Implemented | Implemented | Not built (module missing + licence) |
-| Linux 64-bit | Implemented | Implemented | Not built (module missing + licence) |
-| WebGL | Implemented | **Not supported** | Not built (licence missing; module installed) |
-| Android | Implemented | Implemented in code | Not built (Android module/SDK absent + licence) |
-| iOS | Implemented | Implemented in code | Not built (iOS module absent + licence) |
+| macOS | Implemented | Implemented | **Built and launched** (universal, ad-hoc signed, not notarised) |
+| Windows 64-bit | Implemented | Implemented | Not built (module/tooling not verified) |
+| Linux 64-bit | Implemented | Implemented | Not built (module/tooling not verified) |
+| WebGL | Implemented | **Not supported** | Not built |
+| Android | Implemented | Implemented in code | Not built (Android module/SDK absent) |
+| iOS | Implemented | Implemented in code | Not built (iOS module absent) |
 
-Do not claim a platform is supported until its build has been made, launched and tested on real hardware.
-
-### Tests written but not executed
-
-- 19 Unity EditMode cases and 1 PlayMode smoke case are present and compile, but were blocked by licensing.
-- No real-device touch, gamepad, audio, performance or network-condition testing has occurred.
-- The backend has only been exercised over loopback on one machine, not across NAT, mobile networks or lossy links.
+Do not claim a platform is supported until its build has been made, launched and tested on real hardware. macOS is the only target with a confirmed launch here, and its broader gameplay/manual pass is still outstanding.
 
 ## 2. Multiplayer constraints
 
@@ -97,22 +96,23 @@ Bots fill empty slots to five and are simulated by the server at 17.0–23.5 m/s
 - No final art/audio polish pass, platform loudness normalization, mixer snapshot automation or dynamic-range testing has been performed.
 - No frame-time, memory, battery, thermal or loading-time profiling exists for any target. The procedural runtime world and UI may need optimization on low-end Android/iOS devices.
 - WebGL autoplay policies may delay or mute audio until user interaction; this is not verified.
-- Shader compilation, URP renderer selection and quality settings have not been validated in a running editor/player.
+- URP renderer selection and the core runtime shader set have been validated in the built player, but a full visual/quality pass across all four themes and quality presets has not.
 - The runtime generates materials and meshes; repeated rapid restarts could stress memory management. This has not been measured.
 
 ## 5. Platform/package constraints
 
-- Only **MacStandaloneSupport** and **WebGLSupport** are installed. Windows, Linux, Android and iOS modules must be added through Unity Hub.
+- macOS player support was available and a universal build succeeded. Windows, Linux, Android and iOS modules were not available/verified here and must be added through Unity Hub.
 - No Android SDK, NDK, OpenJDK, device or `adb` is available. No keystore is included.
 - No Xcode iOS export, provisioning profile, signing team or App Store metadata is configured.
-- No macOS notarisation, hardened runtime, entitlements or code-signing identity is configured.
+- No macOS notarisation, hardened runtime, entitlements or Developer ID signing identity is configured; the tested build is ad-hoc signed.
 - Unity's player settings persist a default host of `127.0.0.1:7777`. Every remote device must change this in Settings; a build shipped with defaults only connects to a server on the same device.
 - The server requires TCP port 7777 (or configured port) to be reachable. No relay, NAT traversal, UPnP, matchmaking service or domain/TLS setup exists.
 - Android/iOS network privacy prompts and local-network permissions have not been tested. iOS LAN access may require an `NSLocalNetworkUsageDescription` generated in Xcode.
 
 ## 6. Documentation and licensing constraints
 
-- The project has no repository history, CI pipeline, code signing identity or release channel. Builds and releases must be produced separately.
+- The project is maintained in the GitHub repository `Ridma-kithara/NEON-VELOCITY`, but has **no CI pipeline**, code-signing identity or release channel. Builds and releases must be produced separately.
+- URP post-processing resource stripping is disabled in `UniversalRenderPipelineGlobalSettings.asset` so runtime-created volume profiles keep Bloom, depth of field, motion blur and Panini shaders. This increases player size slightly; the tested macOS bundle is 116.8 MiB.
 - Third-party packages are Unity packages only (URP, Input System, uGUI, Test Framework, IDE integrations), governed by Unity's package/template licences. There is no third-party runtime dependency list beyond Unity itself and Python's standard library.
 - Original assets are delivered as-is for RK VANTAGE GAMES. No trademark registration or copyright registration is claimed or performed by this project.
 - `Tools/generate_audio.py` reproduces the WAV files; `Tools/generate_meta.py` reproduces meta GUIDs from asset paths. Regenerating metas for existing assets is safe only while an asset path is unchanged.
@@ -121,10 +121,10 @@ Bots fill empty slots to five and are simulated by the server at 17.0–23.5 m/s
 
 At minimum:
 
-1. Open and import with a licensed matching Unity editor; resolve any console/import issues.
-2. Run EditMode and PlayMode tests; add a full automated playthrough and five-client integration test.
+1. ~~Open and import with a licensed matching Unity editor; resolve console/import issues.~~ **Done for Unity 6000.6.7f1 on macOS.**
+2. ~~Run EditMode and PlayMode tests; add a full automated playthrough and five-client integration test.~~ **EditMode/PlayMode smoke tests pass; full automated playthrough and five-client Unity integration still needed.**
 3. Perform the manual checklist in the test report on each target device.
-4. Produce and launch builds for every claimed platform; test touch, controller, audio and suspend/resume.
+4. ~~Produce and launch builds for every claimed platform; test touch, controller, audio and suspend/resume.~~ **macOS universal build produced and launched; other targets still needed.**
 5. Add TLS/authentication and deploy the authority in a secured environment if online play is public.
 6. Complete signing, notarisation, store listings, privacy policy and platform compliance.
 7. Profile and optimize on low-end hardware; validate save migration across release versions.

@@ -48,13 +48,161 @@ namespace NeonVelocity.EditorTools
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(MainScene, true) };
+            EnsureRuntimeMaterialTemplates();
+            EnsureAlwaysIncludedShaders();
             AssetDatabase.SaveAssets();
             Debug.Log($"[BUILD] Configured {Company} / {Product} v{Version} ({BundleId}).");
+        }
+
+        /// <summary>
+        /// URP initialises optional post-processing passes even when no volume uses them.
+        /// Those hidden shaders are normally stripped from player builds, which spams
+        /// "stripped from the build" errors at runtime. Keep the passes functional.
+        /// </summary>
+        private static void EnsureAlwaysIncludedShaders()
+        {
+            string[] required =
+            {
+                "Hidden/Universal Render Pipeline/Bloom",
+                "Hidden/Universal Render Pipeline/GaussianDepthOfField",
+                "Hidden/Universal Render Pipeline/BokehDepthOfField",
+                "Hidden/Universal Render Pipeline/CameraMotionBlur",
+                "Hidden/Universal Render Pipeline/PaniniProjection"
+            };
+
+            var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");
+            if (assets == null || assets.Length == 0)
+            {
+                Fail("Could not open ProjectSettings/GraphicsSettings.asset.");
+                return;
+            }
+            var serialized = new SerializedObject(assets[0]);
+            var list = serialized.FindProperty("m_AlwaysIncludedShaders");
+            if (list == null)
+            {
+                Fail("GraphicsSettings has no m_AlwaysIncludedShaders property.");
+                return;
+            }
+
+            for (int s = 0; s < required.Length; s++)
+            {
+                Shader shader = Shader.Find(required[s]);
+                if (shader == null)
+                {
+                    Fail($"Required post-processing shader '{required[s]}' was not found.");
+                    continue;
+                }
+
+                bool present = false;
+                for (int i = 0; i < list.arraySize; i++)
+                {
+                    if (list.GetArrayElementAtIndex(i).objectReferenceValue == shader)
+                    {
+                        present = true;
+                        break;
+                    }
+                }
+                if (present) continue;
+
+                list.InsertArrayElementAtIndex(list.arraySize);
+                list.GetArrayElementAtIndex(list.arraySize - 1).objectReferenceValue = shader;
+                Debug.Log($"[BUILD] Always include shader {required[s]}.");
+            }
+            serialized.ApplyModifiedProperties();
+        }
+
+        /// <summary>
+        /// URP shaders are resolved by name at runtime, which the player build cannot see.
+        /// These Resources materials pin the shaders and the keyword/blend variants the game
+        /// uses so the player does not strip them. MaterialLibrary instantiates these templates.
+        /// </summary>
+        private static void EnsureRuntimeMaterialTemplates()
+        {
+            const string resources = "Assets/Game/Resources";
+            const string folder = resources + "/Materials";
+            if (!AssetDatabase.IsValidFolder(folder))
+                AssetDatabase.CreateFolder(resources, "Materials");
+
+            EnsureTemplate(folder + "/NV_Lit_Opaque.mat", "Universal Render Pipeline/Lit", m =>
+            {
+                m.SetColor("_BaseColor", Color.white);
+                m.SetFloat("_Metallic", 0.2f);
+                m.SetFloat("_Smoothness", 0.6f);
+                m.EnableKeyword("_EMISSION");
+                m.SetColor("_EmissionColor", new Color(0.01f, 0.01f, 0.01f, 1f));
+                m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+            });
+            EnsureTemplate(folder + "/NV_Lit_Transparent.mat", "Universal Render Pipeline/Lit", m =>
+            {
+                MakeTransparent(m, UnityEngine.Rendering.BlendMode.SrcAlpha,
+                    UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha, false);
+            });
+            EnsureTemplate(folder + "/NV_Unlit_Opaque.mat", "Universal Render Pipeline/Unlit", m =>
+            {
+                m.SetColor("_BaseColor", Color.white);
+            });
+            EnsureTemplate(folder + "/NV_Unlit_Transparent.mat", "Universal Render Pipeline/Unlit", m =>
+            {
+                MakeTransparent(m, UnityEngine.Rendering.BlendMode.SrcAlpha,
+                    UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha, false);
+            });
+            EnsureTemplate(folder + "/NV_Unlit_Additive.mat", "Universal Render Pipeline/Unlit", m =>
+            {
+                MakeTransparent(m, UnityEngine.Rendering.BlendMode.SrcAlpha,
+                    UnityEngine.Rendering.BlendMode.One, true);
+            });
+            EnsureTemplate(folder + "/NV_Particles_Additive.mat", "Universal Render Pipeline/Particles/Unlit", m =>
+            {
+                MakeTransparent(m, UnityEngine.Rendering.BlendMode.SrcAlpha,
+                    UnityEngine.Rendering.BlendMode.One, true);
+            });
+        }
+
+        private static void MakeTransparent(Material material, UnityEngine.Rendering.BlendMode source,
+            UnityEngine.Rendering.BlendMode destination, bool disableCull)
+        {
+            material.SetFloat("_Surface", 1f);
+            material.SetFloat("_Blend", disableCull ? 2f : 0f);
+            material.SetFloat("_SrcBlend", (float)source);
+            material.SetFloat("_DstBlend", (float)destination);
+            material.SetFloat("_ZWrite", 0f);
+            material.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            if (disableCull) material.SetFloat("_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+        }
+
+        private static void EnsureTemplate(string path, string shaderName, Action<Material> configure)
+        {
+            Material material = AssetDatabase.LoadAssetAtPath<Material>(path);
+            if (material == null)
+            {
+                Shader shader = Shader.Find(shaderName);
+                if (shader == null)
+                {
+                    Fail($"Required shader '{shaderName}' was not found while creating {path}.");
+                    return;
+                }
+                material = new Material(shader) { name = Path.GetFileNameWithoutExtension(path) };
+                configure(material);
+                AssetDatabase.CreateAsset(material, path);
+                Debug.Log($"[BUILD] Created shader template {path} ({shaderName}).");
+                return;
+            }
+
+            // Keep existing templates in sync after render-pipeline upgrades or keyword fixes.
+            configure(material);
+            EditorUtility.SetDirty(material);
         }
 
         [MenuItem("NEON VELOCITY/Build macOS", priority = 20)]
         public static void BuildMacOS()
         {
+#if UNITY_EDITOR_OSX
+            // Produce one app that runs on both Intel and Apple silicon Macs.
+            UnityEditor.OSXStandalone.UserBuildSettings.architecture =
+                UnityEditor.Build.OSArchitecture.x64ARM64;
+#endif
             Run(BuildTarget.StandaloneOSX, Path.Combine(BuildsRoot, "macOS", "NeonVelocity.app"));
         }
 

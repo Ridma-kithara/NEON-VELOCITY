@@ -2,7 +2,7 @@
 
 **RK VANTAGE GAMES** presents a three-lane, neon-noir endless runner built in **Unity 6000.6.7f1**, **Universal Render Pipeline**, **Input System** and **C#**, with an original authoritative multiplayer backend written in dependency-free **Python**.
 
-> **Verification notice (22 October 2026):** the engine-independent gameplay core (50 tests), the Python race authority (9 integration tests) and both C# compile checks pass. The Unity editor could not be licensed in this environment, so scene import, Unity EditMode/PlayMode tests and platform builds are **implemented but not runtime-verified here**. See [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
+> **Verification notice (22 October 2026):** Unity 6000.6.7f1 Personal licensing is active. The project imports and compiles in Unity, **19/19 EditMode** and **1/1 PlayMode** tests pass, and a **universal (Intel + Apple silicon) macOS player** was built and launched successfully. The PlayMode smoke test covers real boot, main menu, a practice session and clean shutdown. **50/50** headless core tests, **9/9** Python authority tests and **630** static checks also pass. Other platform builds, real-device input/audio, performance profiling and real-network multiplayer remain unverified. See [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
 
 ---
 
@@ -69,7 +69,17 @@ The scene is intentionally almost empty. `GameApp` bootstraps after scene load v
 
 The save file is written to `Application.persistentDataPath/neon_velocity_save.json` with an atomic `.bak` fallback. Starting credits are 500.
 
-### 2. Run the multiplayer authority
+### 2. Play the verified macOS build
+
+The locally verified build is a universal binary for Intel and Apple silicon:
+
+```bash
+open "Builds/macOS/NeonVelocity.app"
+```
+
+`Builds/` is intentionally gitignored, so a fresh clone must create it with **NEON VELOCITY → Build macOS** or the batch command in [BUILD.md](Documentation/BUILD.md). The app is ad-hoc signed, not notarised, and has no store packaging.
+
+### 3. Run the multiplayer authority
 
 ```bash
 # From the project root
@@ -82,7 +92,7 @@ In game, open **MULTIPLAYER**, confirm the host in **SETTINGS → NETWORK** (def
 
 For a LAN session, start the server with `--host 0.0.0.0`, allow TCP 7777 through the firewall, and enter the host machine's LAN IP in each client's Network settings. The protocol is plain TCP and is intended for trusted networks; see the limitations.
 
-### 3. Backend smoke test
+### 4. Backend smoke test
 
 ```bash
 python3 -m unittest discover -s Backend/tests -v
@@ -100,10 +110,11 @@ Assets/Game/
   Scripts/Core/                  Engine-independent deterministic core (NeonVelocity.Core)
   Scripts/                       Runtime game, UI, audio, world, online client
   Scripts/Editor/BuildTools.cs   Project configuration + platform build entry points
-  Scripts/Editor/...             Editor-only build tooling
+  Scripts/Editor/NeonVelocity.EditorTools.asmdef  Editor-only assembly boundary
   Tests/EditMode/                NUnit core + save tests
   Tests/PlayMode/                Boot/menu/practice smoke test
   Resources/Audio/               21 original WAV assets (music, ambience, SFX)
+  Resources/Materials/           Pinned URP shader templates used by the runtime
 Backend/
   server.py                      Authoritative asyncio TCP server
   tests/                         9 end-to-end backend tests
@@ -124,6 +135,7 @@ Documentation/
 
 - **NeonVelocity.Core** — no engine references; pure deterministic rules, track generation, save schema, race DTO/ranking and progression math. Runs in Unity and plain .NET.
 - **NeonVelocity.Runtime** — Unity-facing assembly referencing URP, Input System and uGUI.
+- **NeonVelocity.EditorTools** — editor-only assembly for project configuration, shader templates and builds.
 - **NeonVelocity.Tests.EditMode** / **PlayMode** — test assemblies gated by `UNITY_INCLUDE_TESTS`.
 
 ---
@@ -136,18 +148,32 @@ dotnet run --project Tools/CoreTests/CoreTests.csproj -c Release
 
 # Backend integration tests
 python3 -m unittest discover -s Backend/tests -v
+
+# Static project integrity (630 checks)
+python3 Tools/validate_project.py
 ```
 
-On macOS, if `dotnet` is not on PATH, use Unity's bundled SDK:
+Unity tests run through the Test Framework and pass in this environment:
+
+```text
+EditMode: 19 / 19 passed
+PlayMode:  1 / 1 passed (boot + menu + practice smoke)
+```
+
+Build the verified macOS target:
 
 ```bash
-"/Applications/Unity/Hub/Editor/6000.6.7f1/Unity.app/Contents/Resources/Scripting/DotNetSdk/dotnet" \
-  run --project Tools/CoreTests/CoreTests.csproj -c Release
+UNITY="/Applications/Unity/Hub/Editor/6000.6.7f1/Unity.app/Contents/MacOS/Unity"
+"$UNITY" -batchmode -quit -projectPath "$PWD" \
+  -executeMethod NeonVelocity.EditorTools.BuildTools.BuildMacOS \
+  -logFile "/tmp/neon-velocity-build.log"
+
+open "Builds/macOS/NeonVelocity.app"
 ```
 
-Unity tests live in **Window → General → Test Runner**. Builds use **NEON VELOCITY → Configure Project and Build Settings**, then any **Build …** menu item. Batch commands and module requirements are in [BUILD.md](Documentation/BUILD.md).
+The build tool configures a universal **x86_64 + ARM64** app, creates the pinned URP material templates and retains the post-processing shaders URP would otherwise strip. The verified output was **116.8 MiB**, ad-hoc signed, and launched successfully on this Intel Mac.
 
-**Build status:** no player builds were produced on this machine because the Unity editor lacks an active licence, and only macOS/WebGL support modules are installed. Android/iOS modules and the Android SDK are absent. The build scripts are present and compile, but platform behaviour remains unverified.
+**Build status:** macOS universal player built and launched; editor EditMode/PlayMode tests pass. Windows, Linux, WebGL, Android and iOS builds remain unverified, and no real-device, performance or multi-machine network validation has been performed. Android/iOS modules and SDKs are not available here.
 
 ## Documentation
 

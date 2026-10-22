@@ -148,4 +148,6 @@ Closing the game/process loses the token, so relaunching requires a new room joi
 
 ## 9. Current environment status
 
-The project was authored on macOS 26.7.1 with Unity 6000.6.7f1 and Python 3.9.6. At hand-off, Unity Hub reports no active entitlement, so the editor cannot import or enter Play Mode here. Only `MacStandaloneSupport` and `WebGLSupport` modules are installed; Android/iOS modules and the Android SDK are absent. See [TEST_REPORT.md](TEST_REPORT.md) for exactly what was and was not executed.
+The project was authored and verified on macOS 26.7.1 (Intel) with Unity **6000.6.7f1**, Python 3.9.6 and Unity's bundled .NET SDK. A Personal licence is active. Unity imports/compiles the project, **19/19 EditMode** and **1/1 PlayMode** tests pass, and a universal **Intel + Apple silicon** macOS player built and launched successfully from `Builds/macOS/NeonVelocity.app`.
+
+That launch is not a full manual playthrough. Every mode, power-up, result path, real-device input/audio and multi-machine online race still need the checklist in [TEST_REPORT.md](TEST_REPORT.md). Windows, Linux, WebGL, Android and iOS builds are unverified; Android/iOS modules and SDKs are absent. See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) before making platform claims.

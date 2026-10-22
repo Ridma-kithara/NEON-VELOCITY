@@ -48,6 +48,12 @@ namespace NeonVelocity.Tests
             Assert.That(app.Session.Duration, Is.EqualTo(0f));
             Assert.IsFalse(app.Session.IsOnline);
 
+            // Let the countdown finish and run the real update loop for a few seconds so
+            // gameplay/VFX/collision systems are exercised, not just constructed.
+            yield return new WaitForSecondsRealtime(3.5f);
+            Assert.That(app.Session.Distance, Is.GreaterThan(0f), "Runner did not advance after countdown");
+            Assert.IsFalse(app.Session.IsFinished, "Practice run ended unexpectedly during smoke window");
+
             app.EndSession(false);
             yield return null;
             Assert.IsFalse(app.IsInRun, "Session did not shut down");

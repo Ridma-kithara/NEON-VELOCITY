@@ -15,9 +15,9 @@ Use Unity Hub → **Installs → 6000.6.7f1 → Add modules**:
 | Android APK/AAB | Android Build Support + SDK/NDK + OpenJDK | keystore for release signing |
 | iOS | iOS Build Support | macOS + Xcode |
 
-Installed on the authoring machine at hand-off: **MacStandaloneSupport** and **WebGLSupport** only. No Android/iOS modules, Android SDK or `adb` were present.
+At hand-off, **macOS player support** was available and produced a verified universal build. Windows, Linux, Android and iOS modules were not available/verified here. No Android SDK, NDK or `adb` was present.
 
-An active Unity licence is required before importing or building. Without one, Unity exits with code 198.
+An active Unity licence is required before importing or building. The licence used for the verified build was a Personal entitlement.
 
 ## 2. Configure once
 
@@ -35,6 +35,9 @@ This applies and saves:
 - Linear colour space
 - Android: min SDK 26, ARM64 only, IL2CPP, internet permission forced
 - Build scene list: only `Assets/Game/Scenes/Main.unity`, enabled
+- Runtime URP shader templates under `Assets/Game/Resources/Materials/`, so URP/Lit and URP/Unlit are not stripped
+- Always-included post-processing shaders (Bloom, Gaussian/Bokeh DoF, motion blur, Panini)
+- URP unused-post-processing-resource stripping disabled so runtime-created volume profiles work
 
 The same settings are already persisted in `ProjectSettings/ProjectSettings.asset` and `ProjectSettings/EditorBuildSettings.asset`, but running the menu item is recommended after changing Unity versions.
 
@@ -88,7 +91,8 @@ CI hosts need a Unity licence (licensed runner or floating licence) and the matc
 ### macOS
 
 - Produces an `.app` bundle. The project does not configure notarisation, hardened runtime, entitlements or signing identity.
-- Test both Apple Silicon and Intel if distributing broadly; the build architecture follows the editor's macOS architecture setting, which this project does not override.
+- **BuildMacOS** sets `OSXStandalone.UserBuildSettings.architecture` to **x86_64 + ARM64**, producing a universal app. The verified build was 116.8 MiB and launched on an Intel Mac.
+- The tested app is ad-hoc signed only. For distribution, sign with a Developer ID and notarise separately.
 - Online needs outbound TCP access to port 7777 (or the configured port).
 
 ### Windows / Linux
@@ -133,15 +137,15 @@ The server has no authentication beyond ephemeral session tokens and no TLS. Use
 
 A target is only "verified" after all of the following on real hardware:
 
-- [ ] Unity editor imports the project with zero compile errors.
-- [ ] EditMode tests pass (core + save).
-- [ ] PlayMode smoke test passes (menu, practice run, shutdown).
+- [x] Unity editor imports the project with zero compile errors.
+- [x] EditMode tests pass (core + save): **19 / 19**.
+- [x] PlayMode smoke test passes (menu, practice run, shutdown): **1 / 1**.
 - [ ] Offline modes start, pause, crash, finish and persist progression after restart.
 - [ ] The backend starts, and 2–5 humans can match, ready, count down, race and receive results.
 - [ ] A player can disconnect and reconnect within 45 s without losing their slot.
-- [ ] Build succeeds and launches outside the editor.
+- [x] macOS build succeeds and launches outside the editor (**universal, launched on Intel**).
 - [ ] Audio is audible and input works with the target's keyboard/gamepad/touch.
 - [ ] Online connectivity is tested from the target network (WebGL expected to fail by design).
 - [ ] Signing/store packaging (Android/iOS/macOS) is completed separately.
 
-At hand-off, none of the platform builds above could be produced or launched in this environment; see [TEST_REPORT.md](TEST_REPORT.md).
+The macOS universal build has been produced and launched. Windows/Linux/WebGL/Android/iOS builds have not; see [TEST_REPORT.md](TEST_REPORT.md).

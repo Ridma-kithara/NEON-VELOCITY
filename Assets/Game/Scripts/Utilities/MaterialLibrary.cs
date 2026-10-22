@@ -77,7 +77,8 @@ namespace NeonVelocity.Utilities
                          (emission.HasValue ? ColorUtility.ToHtmlStringRGBA(emission.Value) : "-") + $":{emissionIntensity:F2}";
             if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
 
-            var mat = new Material(LitShader) { name = "NV_Lit_" + key.GetHashCode() };
+            var mat = FromTemplate("NV_Lit_Opaque", LitShader);
+            mat.name = "NV_Lit_" + key.GetHashCode();
             SafeSetColor(mat, "_BaseColor", color);
             SafeSetColor(mat, "_Color", color);
             SafeSetFloat(mat, "_Metallic", metallic);
@@ -90,6 +91,11 @@ namespace NeonVelocity.Utilities
                 SafeSetColor(mat, "_EmissionColor", emissionColor);
                 mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
             }
+            else
+            {
+                mat.DisableKeyword("_EMISSION");
+                SafeSetColor(mat, "_EmissionColor", Color.black);
+            }
             Cache[key] = mat;
             return mat;
         }
@@ -98,7 +104,8 @@ namespace NeonVelocity.Utilities
         {
             string key = $"trans:{ColorUtility.ToHtmlStringRGBA(color)}:{smoothness:F2}";
             if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
-            var mat = new Material(LitShader) { name = "NV_Transparent" };
+            var mat = FromTemplate("NV_Lit_Transparent", LitShader);
+            mat.name = "NV_Transparent";
             SafeSetColor(mat, "_BaseColor", color);
             SafeSetColor(mat, "_Color", color);
             SafeSetFloat(mat, "_Smoothness", smoothness);
@@ -107,6 +114,7 @@ namespace NeonVelocity.Utilities
             SafeSetFloat(mat, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
             SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
             SafeSetFloat(mat, "_ZWrite", 0f);
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
             Cache[key] = mat;
@@ -117,7 +125,8 @@ namespace NeonVelocity.Utilities
         {
             string key = $"add:{ColorUtility.ToHtmlStringRGBA(color)}";
             if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
-            var mat = new Material(ParticleShader) { name = "NV_Additive" };
+            var mat = FromTemplate("NV_Particles_Additive", ParticleShader);
+            mat.name = "NV_Additive";
             if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", Palette.Hdr(color, 2.2f));
             if (mat.HasProperty("_Color")) mat.SetColor("_Color", Palette.Hdr(color, 2.2f));
             SafeSetFloat(mat, "_Surface", 1f);
@@ -126,6 +135,7 @@ namespace NeonVelocity.Utilities
             SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
             SafeSetFloat(mat, "_ZWrite", 0f);
             SafeSetFloat(mat, "_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
             Cache[key] = mat;
@@ -136,7 +146,8 @@ namespace NeonVelocity.Utilities
         {
             string key = $"unlit:{ColorUtility.ToHtmlStringRGBA(color)}:{transparent}";
             if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
-            var mat = new Material(UnlitShader) { name = "NV_Unlit" };
+            var mat = FromTemplate(transparent ? "NV_Unlit_Transparent" : "NV_Unlit_Opaque", UnlitShader);
+            mat.name = "NV_Unlit";
             SafeSetColor(mat, "_BaseColor", color);
             SafeSetColor(mat, "_Color", color);
             if (transparent)
@@ -146,6 +157,7 @@ namespace NeonVelocity.Utilities
                 SafeSetFloat(mat, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
                 SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
                 SafeSetFloat(mat, "_ZWrite", 0f);
+                mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
                 mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
                 mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
             }
@@ -156,7 +168,9 @@ namespace NeonVelocity.Utilities
         public static Material UnlitTextured(string key, Texture texture, Color tint, Vector2 tiling)
         {
             if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
-            var mat = new Material(UnlitShader) { name = key, mainTexture = texture };
+            var mat = FromTemplate("NV_Unlit_Opaque", UnlitShader);
+            mat.name = key;
+            mat.mainTexture = texture;
             SafeSetColor(mat, "_BaseColor", tint);
             SafeSetColor(mat, "_Color", tint);
             if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", texture);
@@ -170,7 +184,8 @@ namespace NeonVelocity.Utilities
         {
             string key = $"trail:{ColorUtility.ToHtmlStringRGBA(color)}";
             if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
-            var mat = new Material(TrailShader) { name = "NV_Trail" };
+            var mat = FromTemplate("NV_Unlit_Additive", TrailShader);
+            mat.name = "NV_Trail";
             SafeSetColor(mat, "_BaseColor", Palette.Hdr(color, 2f));
             SafeSetColor(mat, "_Color", Palette.Hdr(color, 2f));
             SafeSetFloat(mat, "_Surface", 1f);
@@ -179,10 +194,18 @@ namespace NeonVelocity.Utilities
             SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
             SafeSetFloat(mat, "_ZWrite", 0f);
             SafeSetFloat(mat, "_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
             mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
             mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
             Cache[key] = mat;
             return mat;
+        }
+
+        private static Material FromTemplate(string templateName, Shader fallback)
+        {
+            var template = Resources.Load<Material>("Materials/" + templateName);
+            if (template != null) return new Material(template);
+            return new Material(fallback);
         }
 
         private static void SafeSetColor(Material m, string property, Color c)

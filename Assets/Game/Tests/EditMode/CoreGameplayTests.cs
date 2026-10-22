@@ -158,8 +158,8 @@ namespace NeonVelocity.Tests
             Assert.AreEqual(500, xp);
             Assert.AreEqual(1, ProgressionMath.AddXp(ref xp, 620, out level));
             Assert.AreEqual(3, level);
-            Assert.AreEqual(2, ProgressionMath.LevelFromXp(ProgressionMath.TotalXpForLevel(3)));
-            Assert.AreEqual(3, ProgressionMath.LevelFromXp(ProgressionMath.TotalXpForLevel(3) + 450));
+            Assert.AreEqual(3, ProgressionMath.LevelFromXp(ProgressionMath.TotalXpForLevel(3)));
+            Assert.AreEqual(4, ProgressionMath.LevelFromXp(ProgressionMath.TotalXpForLevel(3) + ProgressionMath.XpRequiredForLevel(3)));
             Assert.AreEqual(100, ProgressionMath.LevelFromXp(ProgressionMath.TotalXpForLevel(100) + 99999));
         }
 

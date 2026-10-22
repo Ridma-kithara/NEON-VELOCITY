@@ -11,6 +11,7 @@ using NeonVelocity.UI;
 using NeonVelocity.Utilities;
 using NeonVelocity.World;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.Rendering;
 
 namespace NeonVelocity
@@ -110,19 +111,19 @@ namespace NeonVelocity
         {
             // The URP template scene ships with a camera and light. Remove them so our generated
             // title stage owns the only camera/audio-listener in the scene.
-            var cameras = FindObjectsByType<Camera>(FindObjectsSortMode.None);
+            var cameras = FindObjectsByType<Camera>(FindObjectsInactive.Exclude);
             for (int i = 0; i < cameras.Length; i++)
             {
                 if (cameras[i] != null && cameras[i].transform.parent == null &&
                     cameras[i].gameObject.name != "Menu Camera")
                     Destroy(cameras[i].gameObject);
             }
-            var lights = FindObjectsByType<Light>(FindObjectsSortMode.None);
+            var lights = FindObjectsByType<Light>(FindObjectsInactive.Exclude);
             for (int i = 0; i < lights.Length; i++)
             {
                 if (lights[i] != null && lights[i].transform.parent == null) Destroy(lights[i].gameObject);
             }
-            var listeners = FindObjectsByType<AudioListener>(FindObjectsSortMode.None);
+            var listeners = FindObjectsByType<AudioListener>(FindObjectsInactive.Exclude);
             for (int i = 0; i < listeners.Length; i++)
             {
                 if (listeners[i] != null && listeners[i].gameObject.GetComponent<Camera>() != null &&
@@ -394,7 +395,10 @@ namespace NeonVelocity
         private void Update()
         {
             if (UI == null) return;
-            if (Input.GetKeyDown(KeyCode.Escape))
+            bool pausePressed = Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame;
+            if (!pausePressed && Gamepad.current != null)
+                pausePressed = Gamepad.current.startButton.wasPressedThisFrame;
+            if (pausePressed)
             {
                 if (UI.HasModal)
                 {
