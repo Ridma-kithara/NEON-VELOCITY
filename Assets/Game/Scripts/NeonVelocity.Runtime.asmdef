@@ -1,0 +1,21 @@
+{
+  "name": "NeonVelocity.Runtime",
+  "rootNamespace": "NeonVelocity",
+  "references": [
+    "NeonVelocity.Core",
+    "Unity.InputSystem",
+    "Unity.InputSystem.ForUI",
+    "UnityEngine.UI",
+    "Unity.RenderPipelines.Core.Runtime",
+    "Unity.RenderPipelines.Universal.Runtime"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": true,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}

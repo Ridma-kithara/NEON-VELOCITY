@@ -1,0 +1,204 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace NeonVelocity.Utilities
+{
+    /// <summary>
+    /// Runtime material factory. All assets are original and generated from Unity primitives;
+    /// replace with authored materials by assigning the same named fields in the configurator.
+    /// </summary>
+    public static class MaterialLibrary
+    {
+        private static readonly Dictionary<string, Material> Cache = new Dictionary<string, Material>();
+        private static Shader _litShader;
+        private static Shader _unlitShader;
+        private static Shader _particleShader;
+        private static Shader _trailShader;
+
+        public static Shader LitShader
+        {
+            get
+            {
+                if (_litShader == null)
+                {
+                    _litShader = Shader.Find("Universal Render Pipeline/Lit");
+                    if (_litShader == null) _litShader = Shader.Find("Standard");
+                    if (_litShader == null) _litShader = Shader.Find("Universal Render Pipeline/Unlit");
+                }
+                return _litShader;
+            }
+        }
+
+        public static Shader UnlitShader
+        {
+            get
+            {
+                if (_unlitShader == null)
+                {
+                    _unlitShader = Shader.Find("Universal Render Pipeline/Unlit");
+                    if (_unlitShader == null) _unlitShader = Shader.Find("Unlit/Color");
+                    if (_unlitShader == null) _unlitShader = Shader.Find("Sprites/Default");
+                }
+                return _unlitShader;
+            }
+        }
+
+        public static Shader ParticleShader
+        {
+            get
+            {
+                if (_particleShader == null)
+                {
+                    _particleShader = Shader.Find("Universal Render Pipeline/Particles/Unlit");
+                    if (_particleShader == null) _particleShader = Shader.Find("Particles/Standard Unlit");
+                    if (_particleShader == null) _particleShader = UnlitShader;
+                }
+                return _particleShader;
+            }
+        }
+
+        public static Shader TrailShader
+        {
+            get
+            {
+                if (_trailShader == null)
+                {
+                    _trailShader = Shader.Find("Universal Render Pipeline/Unlit");
+                    if (_trailShader == null) _trailShader = Shader.Find("Sprites/Default");
+                }
+                return _trailShader;
+            }
+        }
+
+        public static Material Lit(Color color, float metallic = 0.25f, float smoothness = 0.65f,
+            Color? emission = null, float emissionIntensity = 1.6f)
+        {
+            string key = $"lit:{ColorUtility.ToHtmlStringRGBA(color)}:{metallic:F2}:{smoothness:F2}:" +
+                         (emission.HasValue ? ColorUtility.ToHtmlStringRGBA(emission.Value) : "-") + $":{emissionIntensity:F2}";
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+
+            var mat = new Material(LitShader) { name = "NV_Lit_" + key.GetHashCode() };
+            SafeSetColor(mat, "_BaseColor", color);
+            SafeSetColor(mat, "_Color", color);
+            SafeSetFloat(mat, "_Metallic", metallic);
+            SafeSetFloat(mat, "_Smoothness", smoothness);
+            SafeSetFloat(mat, "_Glossiness", smoothness);
+            if (emission.HasValue)
+            {
+                Color emissionColor = Palette.Hdr(emission.Value, emissionIntensity);
+                mat.EnableKeyword("_EMISSION");
+                SafeSetColor(mat, "_EmissionColor", emissionColor);
+                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
+            }
+            Cache[key] = mat;
+            return mat;
+        }
+
+        public static Material Transparent(Color color, float smoothness = 0.7f)
+        {
+            string key = $"trans:{ColorUtility.ToHtmlStringRGBA(color)}:{smoothness:F2}";
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+            var mat = new Material(LitShader) { name = "NV_Transparent" };
+            SafeSetColor(mat, "_BaseColor", color);
+            SafeSetColor(mat, "_Color", color);
+            SafeSetFloat(mat, "_Smoothness", smoothness);
+            SafeSetFloat(mat, "_Surface", 1f);
+            SafeSetFloat(mat, "_Blend", 0f);
+            SafeSetFloat(mat, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            SafeSetFloat(mat, "_ZWrite", 0f);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            Cache[key] = mat;
+            return mat;
+        }
+
+        public static Material Additive(Color color)
+        {
+            string key = $"add:{ColorUtility.ToHtmlStringRGBA(color)}";
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+            var mat = new Material(ParticleShader) { name = "NV_Additive" };
+            if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", Palette.Hdr(color, 2.2f));
+            if (mat.HasProperty("_Color")) mat.SetColor("_Color", Palette.Hdr(color, 2.2f));
+            SafeSetFloat(mat, "_Surface", 1f);
+            SafeSetFloat(mat, "_Blend", 2f);
+            SafeSetFloat(mat, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            SafeSetFloat(mat, "_ZWrite", 0f);
+            SafeSetFloat(mat, "_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            Cache[key] = mat;
+            return mat;
+        }
+
+        public static Material Unlit(Color color, bool transparent = false)
+        {
+            string key = $"unlit:{ColorUtility.ToHtmlStringRGBA(color)}:{transparent}";
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+            var mat = new Material(UnlitShader) { name = "NV_Unlit" };
+            SafeSetColor(mat, "_BaseColor", color);
+            SafeSetColor(mat, "_Color", color);
+            if (transparent)
+            {
+                SafeSetFloat(mat, "_Surface", 1f);
+                SafeSetFloat(mat, "_Blend", 0f);
+                SafeSetFloat(mat, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                SafeSetFloat(mat, "_ZWrite", 0f);
+                mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            }
+            Cache[key] = mat;
+            return mat;
+        }
+
+        public static Material UnlitTextured(string key, Texture texture, Color tint, Vector2 tiling)
+        {
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+            var mat = new Material(UnlitShader) { name = key, mainTexture = texture };
+            SafeSetColor(mat, "_BaseColor", tint);
+            SafeSetColor(mat, "_Color", tint);
+            if (mat.HasProperty("_BaseMap")) mat.SetTexture("_BaseMap", texture);
+            if (mat.HasProperty("_BaseMap")) mat.SetTextureScale("_BaseMap", tiling);
+            mat.mainTextureScale = tiling;
+            Cache[key] = mat;
+            return mat;
+        }
+
+        public static Material Trail(Color color)
+        {
+            string key = $"trail:{ColorUtility.ToHtmlStringRGBA(color)}";
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+            var mat = new Material(TrailShader) { name = "NV_Trail" };
+            SafeSetColor(mat, "_BaseColor", Palette.Hdr(color, 2f));
+            SafeSetColor(mat, "_Color", Palette.Hdr(color, 2f));
+            SafeSetFloat(mat, "_Surface", 1f);
+            SafeSetFloat(mat, "_Blend", 2f);
+            SafeSetFloat(mat, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            SafeSetFloat(mat, "_ZWrite", 0f);
+            SafeSetFloat(mat, "_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            Cache[key] = mat;
+            return mat;
+        }
+
+        private static void SafeSetColor(Material m, string property, Color c)
+        {
+            if (m.HasProperty(property)) m.SetColor(property, c);
+        }
+
+        private static void SafeSetFloat(Material m, string property, float value)
+        {
+            if (m.HasProperty(property)) m.SetFloat(property, value);
+        }
+
+        public static void ClearCache()
+        {
+            foreach (var kv in Cache) if (kv.Value != null) Object.Destroy(kv.Value);
+            Cache.Clear();
+        }
+    }
+}
