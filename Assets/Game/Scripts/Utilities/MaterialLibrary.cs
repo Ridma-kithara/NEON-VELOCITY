@@ -200,6 +200,38 @@ namespace NeonVelocity.Utilities
         }
 
         /// <summary>
+        /// Unlit, alpha-blended texture used by the soft contact shadow under runners. The
+        /// material is deliberately unlit and cull-off so it remains stable on every quality
+        /// level and over both wet asphalt and metal station floors.
+        /// </summary>
+        public static Material UnlitTransparentTextured(string key, Texture texture, Color tint, Vector2 tiling)
+        {
+            if (Cache.TryGetValue(key, out Material existing) && existing != null) return existing;
+            var mat = FromTemplate("NV_Unlit_Transparent", UnlitShader);
+            mat.name = key;
+            mat.mainTexture = texture;
+            mat.mainTextureScale = tiling;
+            SafeSetColor(mat, "_BaseColor", tint);
+            SafeSetColor(mat, "_Color", tint);
+            if (mat.HasProperty("_BaseMap"))
+            {
+                mat.SetTexture("_BaseMap", texture);
+                mat.SetTextureScale("_BaseMap", tiling);
+            }
+            SafeSetFloat(mat, "_Surface", 1f);
+            SafeSetFloat(mat, "_Blend", 0f);
+            SafeSetFloat(mat, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            SafeSetFloat(mat, "_ZWrite", 0f);
+            SafeSetFloat(mat, "_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent - 20;
+            Cache[key] = mat;
+            return mat;
+        }
+
+        /// <summary>
         /// Lit material with a generated albedo/normal map. The normal-map template is created
         /// by BuildTools so the _NORMALMAP variant survives URP shader stripping in a player.
         /// </summary>

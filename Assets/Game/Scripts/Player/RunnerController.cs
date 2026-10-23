@@ -78,6 +78,7 @@ namespace NeonVelocity.Player
         public event Action Crashed;
         public event Action Died;
         public event Action WorldRebased;
+        public event Action<float> Landed;
 
         private GameApp App;
         private InputRouter _input;
@@ -110,6 +111,8 @@ namespace NeonVelocity.Player
         private float _prevZ;
         private float _worldShifted;
         private float _rebaseDistance;
+        private float _stepTimer;
+        private int _stepIndex;
         private int _magnetLevel;
         private int _shieldLevel;
         private int _boostLevel;
@@ -157,6 +160,8 @@ namespace NeonVelocity.Player
             PlayerZ = _prevZ;
             Running = false;
             IsDead = false;
+            _stepTimer = 0.16f;
+            _stepIndex = 0;
 
             var character = config.Character(app.Progression.Profile.selectedCharacter);
             var trail = config.Trail(app.Progression.Profile.selectedTrail);
@@ -244,13 +249,14 @@ namespace NeonVelocity.Player
                 ResolvePickups(dt);
             }
 
+            UpdateFootsteps(dt);
             transform.position = new Vector3(_x, _y, PlayerZ);
             if (Visuals != null)
             {
                 float lateralVelocity = _laneTimer > 0f ? (_xTarget - _xStart) / Mathf.Max(0.001f, Config.laneSwitchDuration) : 0f;
                 RunnerPose pose = IsDead ? RunnerPose.Dead
                     : (!_grounded ? RunnerPose.Jump : (IsSliding ? RunnerPose.Slide : (Running ? RunnerPose.Run : RunnerPose.Idle)));
-                Visuals.Tick(dt, SpeedNormalised, lateralVelocity, pose);
+                Visuals.Tick(dt, SpeedNormalised, lateralVelocity, pose, _vy, _y);
                 Visuals.SetShield(_shieldCharges > 0 || _invincibleTimer > 1.3f);
                 Visuals.SetHoverboard(_hoverboardCharges > 0);
                 Visuals.SetAura(_phaseTimer > 0f || _multiplierTimer > 0f || _invincibleTimer > 2.2f);
@@ -261,6 +267,20 @@ namespace NeonVelocity.Player
         {
             if (!_grounded) return;
             // Idle stance has a tiny breathing bob handled by the visuals; nothing else to do.
+        }
+
+        private void UpdateFootsteps(float dt)
+        {
+            if (!Running || !_grounded || IsSliding || Speed < 2f) return;
+            _stepTimer -= dt;
+            if (_stepTimer > 0f) return;
+            float cadence = Mathf.Lerp(0.3f, 0.155f, SpeedNormalised);
+            _stepTimer += Mathf.Max(0.07f, cadence);
+            _stepIndex++;
+            bool metal = Track != null && Mathf.Abs(Track.CurrentBiome) % 4 == 3;
+            App.Audio.PlayFootstep(metal, Mathf.Lerp(0.28f, 0.42f, SpeedNormalised), _stepIndex);
+            if (_stepIndex % 2 == 0 && Speed > Config.baseSpeed * 1.25f)
+                _vfx?.Dust(new Vector3(_x, 0.03f, PlayerZ - 0.1f), metal ? Palette.Cyan : Palette.White, 2);
         }
 
         private void Advance(float dt)
@@ -327,14 +347,19 @@ namespace NeonVelocity.Player
             if (_y <= 0f)
             {
                 bool wasAirborne = !_grounded;
+                float impact = Mathf.Abs(_vy);
                 _y = 0f;
                 _vy = 0f;
                 _grounded = true;
                 _coyoteTimer = 0.11f;
                 if (wasAirborne)
                 {
-                    App.Audio.PlaySfx("sfx_land", 0.55f);
-                    _vfx?.Dust(new Vector3(_x, 0.05f, PlayerZ), Palette.Cyan, 5);
+                    float weight = Mathf.Clamp01(impact / 11f);
+                    App.Audio.PlaySfx("sfx_land", Mathf.Lerp(0.45f, 0.72f, weight), 0.03f);
+                    Visuals?.NotifyLanding(impact);
+                    Landed?.Invoke(impact);
+                    _vfx?.Dust(new Vector3(_x, 0.05f, PlayerZ), Palette.Cyan, 4 + Mathf.RoundToInt(weight * 8f));
+                    _stepTimer = 0.2f;
                 }
                 if (_airJumpTimer > 0f) _airCharges = 1;
                 if (_jumpBufferTimer > 0f) TryJump();
@@ -351,6 +376,7 @@ namespace NeonVelocity.Player
             _xStart = _x;
             _xTarget = LaneMath.LaneToX(Lane);
             _laneTimer = Mathf.Max(0.04f, Config.laneSwitchDuration);
+            App.Audio.PlaySfx("sfx_lane", 0.24f, 0.08f);
             _input?.ResetTransient();
         }
 

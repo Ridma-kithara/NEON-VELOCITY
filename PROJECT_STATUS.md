@@ -8,7 +8,7 @@
 
 ## 1. Current state
 
-The game is playable offline, the menu/garage/settings/shop flows are implemented, and the macOS player has been rebuilt and exercised after the latest QA pass. The current worktree contains the completed navigation, UI, settings, garage and visual upgrades. It is no longer just the baseline commit; see the Git history for the exact revision.
+The game is playable offline, the menu/garage/settings/shop flows are implemented, and the macOS player has been rebuilt and exercised after the latest QA, character, audio and world-polish pass. The current worktree contains the completed navigation/UI/settings/garage work plus layered procedural armour, generated armour materials, new synthesized spatial audio, wet-reflection street dressing, a subway-station pass and authoritative biome reporting. It is no longer just the baseline commit; see the Git history for the exact revision.
 
 | Area | State |
 |---|---|
@@ -21,7 +21,7 @@ The game is playable offline, the menu/garage/settings/shop flows are implemente
 | Shop / currency | Implemented with confirmation and duplicate-dialog guard; final debits remain protected by Progression checks |
 | Navigation / Back | Centralized history and contextual Back; tested for Shop/Modes/Settings-from-Pause/Results/modal routes |
 | HUD / pause | Solo-only panels, readable pause glyph, toast placement and pause/settings flow fixed |
-| Visual upgrade | Original procedural runner, layered city, wet reflections, rain/mist, neon signage, sky train, air traffic, post-processing |
+| Visual upgrade | Beveled layered runner armour, generated materials, wet reflections, tiered city, subway station, rain/mist, neon signage, sky train, air traffic and post-processing |
 | PC 4K support | Actual 3840 × 2160 render/capture verified on the host; physical 4K display and 4K performance not verified |
 | Mobile quality profile | Implemented with independent mobile settings path; no device build/validation |
 | Builds | macOS universal verified; Windows/Linux/Android/iOS not built here |
@@ -34,15 +34,24 @@ The game is playable offline, the menu/garage/settings/shop flows are implemente
 | Unity PlayMode | **8 / 8 passed** |
 | Headless core | **50 / 50 passed** |
 | Python backend | **9 / 9 passed** |
-| Static integrity | **667 / 667 passed** |
+| Static integrity | **709 / 709 passed** |
 | Compilation | **0 errors** in the tested assemblies |
 | macOS build | **Succeeded**, 117.0 MiB, x86_64 + arm64 |
-| Captures | 7 screens at **1600 × 900**, **1280 × 800** and actual **3840 × 2160** PNGs |
+| Captures | 8 screens at **1600 × 900**, **1280 × 800** and actual **3840 × 2160** PNGs, including a real subway/station frame |
 | Runtime capture log | Completed without runtime exceptions |
 
 The PlayMode suite includes real bootstrap, Practice start, quick-tap jump clearance, Back-stack routing, title/quit modal priority, garage preview cleanup, Results root return, settings-from-pause return, and purchase-confirmation safety.
 
 ## 3. Implemented in this pass
+
+### Character, audio and world polish
+- Cached 26-facet chamfered armour geometry, articulated palms/fingers and layered boots in `PrimitiveMeshes.cs` / `RunnerVisuals.cs`.
+- Generated armour albedo, normal and height textures in `TextureFactory.cs`; transparent contact shadow and emissive trim.
+- Landing compression, lane banking, jump/slide/fall/victory poses and optional vertical-velocity/ground-height animation parameters.
+- Footsteps with wet/metal variants, lane whoosh, thunder and train pass-by clips; pooled spatial one-shots in `AudioManager.cs`.
+- Wet-road reflection cards, puddle/curb light pools, storefront mullions/doorways, tiered facades and expanded subway station geometry in `TrackManager.cs`.
+- Landing camera dip/FOV punch in `RunnerCamera.cs`, respecting reduced motion.
+- Authoritative biome reporting from `TrackDirector` plans so lighting/audio match the generated segment.
 
 ### Navigation and flow
 - Central `AppScreen` history managed by `GameApp`.
@@ -56,7 +65,7 @@ The PlayMode suite includes real bootstrap, Practice start, quick-tap jump clear
 - Scaled PC/mobile settings: Low, Medium, High, Ultra, Custom.
 - Resolution, windowed/borderless (and Windows/Linux exclusive fullscreen offset), 30/60/120/144 FPS, render scale, textures, shadows, reflections, AA, effects and view distance.
 - True 4K render/capture path validated; UI inspected at 3840 × 2160.
-- Original layered runner with armour, joints, chest core, backpack thrusters, helmet and emissive visor.
+- Original layered runner with beveled armour, articulated hands/feet, chest core, backpack thrusters, helmet and emissive visor.
 - Wet road, denser neon facade windows, procedural sign glyphs, maglev sky train, air traffic, rain, mist and post-processing.
 - City-first opening biome for all seeds; deterministic multiplayer rotation.
 
@@ -71,7 +80,7 @@ The PlayMode suite includes real bootstrap, Practice start, quick-tap jump clear
 - EditMode: 24 tests, including settings clamps/presets, city-first opening, and save round-trip of new display/render fields.
 - PlayMode: 8 tests, including navigation and purchase-confirmation flows.
 - Core test expectation updated for Custom preset (4).
-- VisualCaptureRunner captures seven screens with selectable resolution.
+- VisualCaptureRunner captures eight screens with selectable resolution, including a time-accelerated subway/station frame.
 
 ## 4. Generated / authored assets
 
@@ -79,7 +88,7 @@ All runtime assets remain original and procedural:
 - geometry from Unity primitives;
 - textures generated by `TextureFactory`;
 - UI built at runtime;
-- audio synthesized by `Tools/generate_audio.py`;
+- 27 audio clips synthesized by `Tools/generate_audio.py` (ambience, music and SFX);
 - no copyrighted characters, logos, third-party art packs or proprietary assets.
 
 This is intentionally a code-only/original pipeline. It is not a production DCC asset pipeline, and the result is stylised rather than photoreal.
@@ -90,7 +99,8 @@ This is intentionally a code-only/original pipeline. It is not a production DCC 
 - macOS build compiles, launches and completes the capture flow without runtime exceptions.
 - Menu, settings, shop/garage, mode select, two gameplay frames and pause render correctly at 16:9, 16:10 and 4K.
 - Core logic, authority, settings clamps/persistence, navigation and purchase-confirmation logic pass automated checks.
-- Offline Practice launch and jump regression pass in PlayMode.
+- Offline Practice launch, jump regression, navigation and purchase routes pass in PlayMode.
+- Player captures reached a real subway segment after fast-forwarding; biome environment and geometry agree. No missing audio clips, runtime exceptions or stripped shaders were reported. Audio was not auditioned.
 
 ### Not verified
 - Physical 4K display output, HDR, cable/mode negotiation and 60 FPS at 4K.
@@ -99,6 +109,7 @@ This is intentionally a code-only/original pipeline. It is not a production DCC 
 - Two/five real Unity clients, latency/loss, reconnect through the UI, NAT/TLS.
 - CPU/GPU/memory/thermal profiling and long-session memory growth.
 - Full manual playthrough of all modes, every power-up/obstacle/pickup/result path.
+- Audible audio balance, loudness and device output; no listening test was performed.
 - macOS Developer ID signing, hardened runtime, notarisation and store packaging.
 - Full confirmed shop purchase on a disposable profile (modal/no-charge guard is tested; the final debit path was not exercised end-to-end in PlayMode to avoid mutating the real save).
 

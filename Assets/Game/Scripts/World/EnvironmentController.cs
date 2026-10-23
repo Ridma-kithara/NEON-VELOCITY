@@ -53,6 +53,8 @@ namespace NeonVelocity.World
         private int _biome = -1;
         private float _time;
         private float _flash;
+        private float _thunderTimer;
+        private bool _trainPassPlayed;
         private bool _reduced;
         private float _quality = 2f;
         private int _effectsQuality = 2;
@@ -448,7 +450,16 @@ namespace NeonVelocity.World
             var p = _trainRoot.transform.position;
             p.z -= dt * 26f;
             p.y = 16f + Mathf.Sin(_time * 0.7f) * 0.06f;
-            if (p.z < runnerZ - 70f) p.z = runnerZ + 195f;
+            if (!_trainPassPlayed && p.z < runnerZ + 46f)
+            {
+                _trainPassPlayed = true;
+                _app?.Audio.PlaySfxAt("sfx_train_pass", new Vector3(p.x, p.y, p.z), 0.42f, 18f, 280f);
+            }
+            if (p.z < runnerZ - 70f)
+            {
+                p.z = runnerZ + 195f;
+                _trainPassPlayed = false;
+            }
             _trainRoot.transform.position = p;
         }
 
@@ -614,6 +625,17 @@ namespace NeonVelocity.World
             {
                 _flash = 1f;
                 _nextFlash = Time.time + UnityEngine.Random.Range(11f, 24f);
+                _thunderTimer = 0.7f;
+            }
+            if (_thunderTimer > 0f)
+            {
+                _thunderTimer -= dt;
+                if (_thunderTimer <= 0f)
+                {
+                    var storm = new Vector3(p.x + UnityEngine.Random.Range(-120f, 120f), 70f,
+                        p.z + UnityEngine.Random.Range(80f, 220f));
+                    _app?.Audio.PlaySfxAt("sfx_thunder", storm, 0.62f, 55f, 480f);
+                }
             }
 
             var theme = _theme;

@@ -2,7 +2,7 @@
 
 **RK VANTAGE GAMES** presents a three-lane, neon-noir endless runner built in **Unity 6000.6.7f1**, **Universal Render Pipeline**, **Input System** and **C#**, with an original authoritative multiplayer backend written in dependency-free **Python**.
 
-> **Verification notice (24 October 2026):** Unity 6000.6.7f1 Personal licensing is active. The project imports and compiles in Unity, **24/24 EditMode** and **8/8 PlayMode** tests pass, and a **universal (Intel + Apple silicon) macOS player** was built, launched and visually exercised. The PlayMode tests cover real boot, main menu, a practice session, clean shutdown, quick-tap jump clearance, navigation/Back routing, settings-from-pause, Results return, garage cleanup and shop purchase confirmation. **50/50** headless core tests, **9/9** Python authority tests and **667** static checks also pass. Seven screens were captured at 1600×900, 1280×800 and an actual 3840×2160 backbuffer; a physical 4K display and 4K frame-rate profiling were not available. Other platform builds, real-device input/audio, performance profiling and real-network multiplayer remain unverified. See [QA Report](QA_REPORT.md), [Project Status](PROJECT_STATUS.md), [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
+> **Verification notice (24 October 2026):** Unity 6000.6.7f1 Personal licensing is active. The project imports and compiles in Unity, **24/24 EditMode** and **8/8 PlayMode** tests pass, and a **universal (Intel + Apple silicon) macOS player** was built, launched and visually exercised. The PlayMode tests cover real boot, main menu, a practice session, clean shutdown, quick-tap jump clearance, navigation/Back routing, settings-from-pause, Results return, garage cleanup and shop purchase confirmation. **50/50** headless core tests, **9/9** Python authority tests and **709** static checks also pass. Eight screens were captured at 1600×900, 1280×800 and an actual 3840×2160 backbuffer, including a seeded subway/station segment. The latest pass adds beveled procedural armour, generated armour materials, wet-road reflection dressing and six synthesized spatial SFX; audio was loaded without missing-resource errors but was not audibly balanced or profiled. A physical 4K display and 4K frame-rate profiling were not available. Other platform builds, real-device input/audio, performance profiling and real-network multiplayer remain unverified. See [QA Report](QA_REPORT.md), [Project Status](PROJECT_STATUS.md), [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
 
 ---
 
@@ -151,7 +151,7 @@ dotnet run --project Tools/CoreTests/CoreTests.csproj -c Release
 # Backend integration tests
 python3 -m unittest discover -s Backend/tests -v
 
-# Static project integrity (667 checks)
+# Static project integrity (709 checks)
 python3 Tools/validate_project.py
 ```
 

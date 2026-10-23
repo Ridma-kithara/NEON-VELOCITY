@@ -7,10 +7,10 @@ This document records what is genuinely complete, what is constrained by the cur
 ### Verified in this environment (24 October 2026)
 
 - Unity **6000.6.7f1** imported and compiled the project with **0 errors** after the editor-only assembly boundary was added.
-- **50 / 50** headless gameplay-core tests, **9 / 9** Python authority tests and **667** static checks passed.
+- **50 / 50** headless gameplay-core tests, **9 / 9** Python authority tests and **709** static checks passed.
 - **24 / 24** Unity EditMode tests passed.
 - **8 / 8** Unity PlayMode tests passed: real bootstrap, title stage, Practice start, clean shutdown, quick-tap jump regression, centralized navigation/Back routes, Settings-from-Pause, Results return, garage cleanup and purchase-confirmation safety.
-- Developer-run captures of seven screens at 1600×900, 1280×800 and 3840×2160 confirmed the generated menu, HUD, garage, road, city facades, signage and wet material render in the player. The 4K PNGs are actual 3840×2160 output; no physical 4K display was available. This is a smoke check, not a full manual graphics review.
+- Developer-run captures of eight screens at 1600×900, 1280×800 and 3840×2160 confirmed the generated menu, HUD, garage, beveled runner, road, tiered city facades, storefronts, wet reflections and a seeded subway-station segment render in the player. The subway frame uses a temporary time-scale acceleration and hazard clearing. The 4K PNGs are actual 3840×2160 output; no physical 4K display was available. This is a smoke check, not a full manual graphics review.
 - A universal **x86_64 + ARM64** macOS player (`Builds/macOS/NeonVelocity.app`, 117.0 MiB) was built and launched. The final capture run completed without runtime exceptions.
 - The app is **ad-hoc signed** only; there is no Developer ID, hardened runtime or notarisation.
 
@@ -21,6 +21,7 @@ This document records what is genuinely complete, what is constrained by the cur
 - Windows, Linux, WebGL, Android and iOS player builds.
 - Real-device touch, gamepad, audio, suspend/resume and performance.
 - Frame time, memory, battery and thermal profiling.
+- Audible audio balance, loudness and device output for the 27 synthesized clips; only missing-resource checks were performed.
 - Public-internet deployment, TLS, signing, notarisation and store packaging.
 
 ### Platform build status

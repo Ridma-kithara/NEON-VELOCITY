@@ -36,6 +36,8 @@ namespace NeonVelocity.World
             public Material GroundDark;
             public Material Sidewalk;
             public Material Puddle;
+            public Material WetGlow;
+            public Material WetGlowAlt;
             public Material Metal;
             public Material Paint;
             public Material Trim;
@@ -123,6 +125,13 @@ namespace NeonVelocity.World
                         Color.Lerp(theme.buildingA, Color.white, 0.18f), 0.12f, 0.5f,
                         new Vector2(2f, 12f)),
                     Puddle = MaterialLibrary.Lit(Color.Lerp(theme.skyBottom, Palette.Void, 0.45f), 0.92f, 0.99f),
+                    WetGlow = MaterialLibrary.UnlitAdditiveTextured("NV_WetGlow_" + i,
+                        TextureFactory.RadialGlow(64),
+                        new Color(theme.accent.r, theme.accent.g, theme.accent.b, 0.3f), Vector2.one, false, -30),
+                    WetGlowAlt = MaterialLibrary.UnlitAdditiveTextured("NV_WetGlowAlt_" + i,
+                        TextureFactory.RadialGlow(64),
+                        new Color(Palette.Magenta.r, Palette.Magenta.g, Palette.Magenta.b, 0.22f),
+                        Vector2.one, false, -30),
                     Metal = MaterialLibrary.Lit(Color.Lerp(theme.buildingA, Palette.White, 0.13f), 0.88f, 0.76f),
                     Paint = MaterialLibrary.Lit(Color.Lerp(Palette.White, theme.accent, 0.18f), 0.08f, 0.74f),
                     Trim = MaterialLibrary.Lit(Color.Lerp(theme.buildingA, Palette.White, 0.2f), 0.75f, 0.7f),
@@ -199,7 +208,11 @@ namespace NeonVelocity.World
                 }
             }
 
-            int biome = currentIndex / 4 % 4;
+            // Ask the director for the biome of the segment the runner is actually on. The
+            // director applies the seeded rotation offset after the opening city section, so
+            // using a local index/4 formula here would desynchronise lighting, rain and audio
+            // from the geometry as soon as the seed offset was non-zero.
+            int biome = _director.GetSegment(currentIndex).BiomeIndex;
             if (biome != _currentBiome)
             {
                 _currentBiome = biome;
@@ -375,6 +388,31 @@ namespace NeonVelocity.World
                     new Vector3(rng.Range(0.9f, 2.2f), 0.012f, rng.Range(1.6f, 4.2f)),
                     Quaternion.Euler(0f, rng.Range(-14f, 14f), 0f));
             }
+
+            // Soft additive smears sit on top of the glossy asphalt and read as the wet
+            // reflection of lane neon, shop signs and the amber street lamps. They are flat
+            // cards, so the effect costs only a handful of triangles and no extra lights.
+            for (int i = 0; i < 6; i++)
+            {
+                int lane = rng.Range(0, 3);
+                float x = LaneMath.LaneToX(lane) + rng.Range(-0.55f, 0.55f);
+                float z = rng.Range(4f, SegmentLength - 4f);
+                Material glow = i % 3 == 0 ? mats.WetGlowAlt : mats.WetGlow;
+                b.Quad(glow, new Vector3(x, 0.042f, z),
+                    new Vector3(rng.Range(0.45f, 1.1f), rng.Range(2.1f, 4.8f), 1f),
+                    Quaternion.Euler(90f, rng.Range(-8f, 8f), 0f));
+            }
+            for (int side = -1; side <= 1; side += 2)
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 6f + i * 13f + rng.Range(-2f, 2f);
+                    b.Quad(i == 1 ? mats.WetGlowAlt : mats.WetGlow,
+                        new Vector3(side * 4.12f, 0.043f, z),
+                        new Vector3(0.55f, 2.7f, 1f), Quaternion.Euler(90f, 0f, 0f));
+                }
+            }
+
             for (int z = 10; z < SegmentLength; z += 12)
                 b.Box(mats.GroundDark, new Vector3(0f, 0.007f, z), new Vector3(9.2f, 0.008f, 0.04f));
 
@@ -399,9 +437,35 @@ namespace NeonVelocity.World
                     float depth = rng.Range(8f, 12f);
                     float height = rng.Range(10f, 29f);
                     Material facade = i % 2 == 0 ? mats.BuildingA : mats.BuildingB;
-                    b.Box(facade, new Vector3(x, height * 0.5f - 0.2f, z), new Vector3(width, height, depth));
-                    b.Box(mats.Roof, new Vector3(x, height + 0.08f, z), new Vector3(width + 0.4f, 0.35f, depth + 0.4f));
+                    int tiers = height > 19f ? 2 : 1;
+                    float lowerHeight = tiers == 2 ? height * 0.68f : height;
+                    float crownHeight = height - lowerHeight;
+                    float upperWidth = width * 0.72f;
+                    float upperDepth = depth * 0.78f;
+                    b.Box(facade, new Vector3(x, lowerHeight * 0.5f - 0.2f, z),
+                        new Vector3(width, lowerHeight, depth));
+                    b.Box(mats.Roof, new Vector3(x, lowerHeight - 0.02f, z),
+                        new Vector3(width + 0.34f, 0.3f, depth + 0.34f));
+                    if (crownHeight > 0.5f)
+                    {
+                        b.Box(facade, new Vector3(x, lowerHeight + crownHeight * 0.5f - 0.2f, z),
+                            new Vector3(upperWidth, crownHeight, upperDepth));
+                        b.Box(mats.Roof, new Vector3(x, height + 0.08f, z),
+                            new Vector3(upperWidth + 0.4f, 0.35f, upperDepth + 0.4f));
+                    }
+                    else
+                    {
+                        b.Box(mats.Roof, new Vector3(x, height + 0.08f, z),
+                            new Vector3(width + 0.4f, 0.35f, depth + 0.4f));
+                    }
                     float nearX = x - side * (width * 0.5f + 0.04f);
+                    float upperNearX = x - side * (upperWidth * 0.5f + 0.04f);
+                    b.Box(mats.Neon, new Vector3(upperNearX, lowerHeight + crownHeight * 0.56f, z),
+                        new Vector3(0.065f, crownHeight * 0.64f, 0.12f));
+                    b.Box(mats.Trim, new Vector3(nearX, lowerHeight + 0.1f, z - depth * 0.5f),
+                        new Vector3(0.18f, 0.18f, 0.18f));
+                    b.Box(mats.Trim, new Vector3(nearX, lowerHeight + 0.1f, z + depth * 0.5f),
+                        new Vector3(0.18f, 0.18f, 0.18f));
 
                     // Ground-floor storefront, awning and bright product windows.
                     b.Box(mats.GroundDark, new Vector3(nearX - side * 0.06f, 1.4f, z),
@@ -411,18 +475,47 @@ namespace NeonVelocity.World
                         float sz = z + (store - 0.5f) * depth * 0.42f;
                         b.Box(mats.Sign, new Vector3(nearX - side * 0.15f, 1.55f, sz),
                             new Vector3(0.08f, 1.35f, depth * 0.28f));
+                        b.Box(mats.Metal, new Vector3(nearX - side * 0.19f, 1.55f, sz),
+                            new Vector3(0.035f, 0.055f, depth * 0.29f));
+                        b.Box(mats.Metal, new Vector3(nearX - side * 0.19f, 1.0f, sz),
+                            new Vector3(0.035f, 0.045f, depth * 0.29f));
+                        b.Quad(mats.WetGlow, new Vector3(nearX - side * 1.7f, 0.044f, sz),
+                            new Vector3(1.4f, 2.5f, 1f), Quaternion.Euler(90f, 0f, 0f));
                     }
+                    // Recessed doorway and a lit transom keep the storefront from reading as
+                    // a flat repeating decal at speed.
+                    b.Box(mats.GroundDark, new Vector3(nearX - side * 0.16f, 1.1f, z - depth * 0.3f),
+                        new Vector3(0.12f, 2.2f, 1.25f));
+                    b.Box(mats.Neon, new Vector3(nearX - side * 0.23f, 2.25f, z - depth * 0.3f),
+                        new Vector3(0.025f, 0.1f, 0.8f));
                     b.Box(mats.Metal, new Vector3(nearX - side * 0.68f, 2.9f, z),
                         new Vector3(1.4f, 0.09f, depth * 0.64f));
                     b.Box(mats.NeonAlt, new Vector3(nearX - side * 1.34f, 2.82f, z),
                         new Vector3(0.055f, 0.05f, depth * 0.6f));
 
                     // Window ledges and balcony slabs give the block a readable human scale.
-                    int floors = Mathf.Min(7, Mathf.FloorToInt(height / 3.2f));
+                    int floors = Mathf.Min(7, Mathf.FloorToInt(lowerHeight / 3.2f));
                     for (int floor = 1; floor <= floors; floor++)
                     {
                         b.Box(mats.Roof, new Vector3(nearX, floor * 3.2f, z),
                             new Vector3(0.24f, 0.11f, depth * 0.92f));
+                        if (floor % 2 == 1)
+                            b.Box(mats.Metal, new Vector3(nearX - side * 0.11f, floor * 3.2f + 0.12f, z),
+                                new Vector3(0.04f, 0.035f, depth * 0.78f));
+                    }
+                    if (crownHeight > 3f)
+                    {
+                        for (int floor = 0; floor < 2; floor++)
+                        {
+                            float wy = lowerHeight + 2.3f + floor * 3.1f;
+                            if (wy > height - 1.2f) break;
+                            b.Box(mats.Roof, new Vector3(upperNearX, wy, z),
+                                new Vector3(0.2f, 0.09f, upperDepth * 0.9f));
+                            b.Box(mats.Neon, new Vector3(upperNearX - side * 0.02f, wy + 0.04f, z),
+                                new Vector3(0.035f, 0.035f, upperDepth * 0.5f));
+                        }
+                        b.Box(mats.Metal, new Vector3(upperNearX, height - 0.35f, z),
+                            new Vector3(0.06f, 0.06f, upperDepth * 0.88f));
                     }
                     if (rng.Chance(0.55f))
                     {
@@ -435,9 +528,13 @@ namespace NeonVelocity.World
                         }
                     }
 
-                    b.Box(mats.Neon, new Vector3(nearX, height * 0.58f, z),
-                        new Vector3(0.07f, height * 0.64f, 0.14f));
-                    b.Box(mats.Billboard, new Vector3(nearX - side * 0.05f, height * 0.7f, z),
+                    float billboardY = crownHeight > 0.5f
+                        ? lowerHeight + crownHeight * 0.5f
+                        : height * 0.64f;
+                    float billboardX = crownHeight > 0.5f ? upperNearX : nearX;
+                    b.Box(mats.Neon, new Vector3(billboardX, billboardY, z - depth * 0.15f),
+                        new Vector3(0.07f, Mathf.Max(2.2f, billboardY * 0.52f), 0.13f));
+                    b.Box(mats.Billboard, new Vector3(billboardX - side * 0.05f, billboardY, z),
                         new Vector3(0.09f, 2.7f, depth * 0.54f));
 
                     // Blade sign projecting over the sidewalk.
@@ -485,6 +582,17 @@ namespace NeonVelocity.World
                     b.Box(mats.Metal, new Vector3(side * 6.55f, 2.3f, z), new Vector3(0.11f, 4.6f, 0.11f));
                     b.Box(mats.Metal, new Vector3(side * 6.05f, 4.5f, z), new Vector3(1.1f, 0.1f, 0.14f));
                     b.Box(mats.Neon, new Vector3(side * 5.55f, 4.44f, z), new Vector3(0.45f, 0.05f, 0.24f));
+                    b.Quad(mats.WetGlow, new Vector3(side * 5.5f, 0.044f, z),
+                        new Vector3(1.8f, 3.2f, 1f), Quaternion.Euler(90f, 0f, 0f));
+                    b.Box(mats.Metal, new Vector3(side * 6.55f, 0.24f, z),
+                        new Vector3(0.18f, 0.48f, 0.18f));
+                    if (i < 2)
+                    {
+                        b.Box(mats.Metal, new Vector3(side * 4.62f, 0.38f, z + 4f),
+                            new Vector3(0.1f, 0.76f, 0.1f));
+                        b.Box(mats.NeonAlt, new Vector3(side * 4.62f, 0.78f, z + 4f),
+                            new Vector3(0.13f, 0.06f, 0.13f));
+                    }
                 }
 
                 // Layered far skyline with emissive crowns.
@@ -584,17 +692,69 @@ namespace NeonVelocity.World
             float half = SegmentLength * 0.5f;
             for (int side = -1; side <= 1; side += 2)
             {
+                // Structural shell, tiled wall bays and lit steel ribs.
                 b.Box(mats.GroundDark, new Vector3(side * 6.5f, 3.2f, half), new Vector3(1.2f, 6.4f, SegmentLength));
+                b.Box(mats.GroundDark, new Vector3(side * 5.86f, 1.5f, half), new Vector3(0.08f, 1.9f, SegmentLength));
                 for (int i = 0; i < 7; i++)
                 {
                     float z = 3f + i * 6f;
-                    b.Box(mats.Metal, new Vector3(side * 5.85f, 3.2f, z), new Vector3(0.2f, 6.2f, 0.3f));
-                    b.Box(mats.Neon, new Vector3(side * 5.8f, 1.1f, z), new Vector3(0.06f, 0.8f, 0.25f));
-                    b.Box(mats.NeonAlt, new Vector3(side * 5.82f, 4.5f, z), new Vector3(0.04f, 0.3f, 0.14f));
+                    b.Box(mats.Metal, new Vector3(side * 5.78f, 3.2f, z), new Vector3(0.2f, 6.2f, 0.3f));
+                    b.Box(mats.Neon, new Vector3(side * 5.72f, 1.15f, z), new Vector3(0.06f, 0.85f, 0.24f));
+                    b.Box(mats.NeonAlt, new Vector3(side * 5.74f, 4.55f, z), new Vector3(0.04f, 0.3f, 0.14f));
+                    b.Box(mats.Metal, new Vector3(side * 5.72f, 2.5f, z), new Vector3(0.06f, 0.08f, 4.7f));
+                    b.Box(mats.GroundDark, new Vector3(side * 5.81f, 3.55f + (i % 2) * 0.55f, z + 2.6f),
+                        new Vector3(0.025f, 0.55f, 2.2f));
                 }
-                b.Box(mats.Puddle, new Vector3(side * 4.36f, 0.008f, half), new Vector3(0.55f, 0.012f, SegmentLength));
-                b.Cylinder(mats.Pipe, new Vector3(side * 5.55f, 5.65f, half), new Vector3(0.12f, 21f, 0.12f),
+
+                // Subway platform behind the existing safety rail. The rail reads as the
+                // platform-edge barrier instead of being duplicated or removed.
+                b.Box(mats.Sidewalk, new Vector3(side * 5.46f, 0.17f, half), new Vector3(1.02f, 0.34f, SegmentLength));
+                b.Box(mats.Metal, new Vector3(side * 4.97f, 0.19f, half), new Vector3(0.09f, 0.38f, SegmentLength));
+                b.Box(mats.NeonAlt, new Vector3(side * 4.925f, 0.385f, half), new Vector3(0.05f, 0.02f, SegmentLength));
+                b.Box(mats.Paint, new Vector3(side * 5.18f, 0.366f, half), new Vector3(0.18f, 0.012f, SegmentLength));
+                b.Box(mats.Metal, new Vector3(side * 5.86f, 0.37f, half), new Vector3(0.14f, 0.1f, SegmentLength));
+
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 6f + i * 16f;
+                    b.Box(mats.Metal, new Vector3(side * 5.58f, 1.95f, z), new Vector3(0.24f, 3.55f, 0.24f));
+                    b.Box(mats.Trim, new Vector3(side * 5.58f, 0.38f, z), new Vector3(0.42f, 0.12f, 0.42f));
+                    b.Box(mats.Trim, new Vector3(side * 5.58f, 3.72f, z), new Vector3(0.38f, 0.1f, 0.38f));
+                    b.Box(mats.Neon, new Vector3(side * 5.44f, 2.0f, z), new Vector3(0.06f, 2.4f, 0.08f));
+                    b.Box(mats.NeonAlt, new Vector3(side * 5.44f, 0.7f, z), new Vector3(0.04f, 0.25f, 0.08f));
+                    b.Box(mats.Metal, new Vector3(side * 5.55f, 3.92f, z), new Vector3(0.34f, 0.06f, 0.34f));
+                }
+
+                // Bench, litter bin and platform light pools.
+                for (int i = 0; i < 2; i++)
+                {
+                    float z = 12f + i * 20f;
+                    b.Box(mats.Metal, new Vector3(side * 5.52f, 0.58f, z), new Vector3(0.62f, 0.1f, 1.55f));
+                    b.Box(mats.Metal, new Vector3(side * 5.82f, 0.95f, z), new Vector3(0.1f, 0.5f, 1.55f));
+                    b.Box(mats.Metal, new Vector3(side * 5.52f, 0.4f, z - 0.62f), new Vector3(0.1f, 0.45f, 0.1f));
+                    b.Box(mats.Metal, new Vector3(side * 5.52f, 0.4f, z + 0.62f), new Vector3(0.1f, 0.45f, 0.1f));
+                    b.Box(mats.NeonAlt, new Vector3(side * 5.88f, 0.55f, z + 2.4f), new Vector3(0.16f, 0.42f, 0.3f));
+                    b.Quad(mats.WetGlow, new Vector3(side * 5.25f, 0.374f, z),
+                        new Vector3(1.2f, 2.4f, 1f), Quaternion.Euler(90f, 0f, 0f));
+                }
+
+                // Station signage and route maps on the platform wall.
+                b.Box(mats.Sign, new Vector3(side * 5.78f, 3.1f, 15f), new Vector3(0.06f, 0.85f, 3.0f));
+                b.Box(mats.Metal, new Vector3(side * 5.82f, 3.1f, 15f), new Vector3(0.07f, 0.98f, 3.22f));
+                b.Box(mats.Billboard, new Vector3(side * 5.82f, 2.15f, 33f), new Vector3(0.06f, 1.25f, 2.4f));
+                b.Box(mats.Neon, new Vector3(side * 5.79f, 2.15f, 33f), new Vector3(0.025f, 0.06f, 2.0f));
+
+                // Pipes, clamps and junction boxes.
+                b.Cylinder(mats.Pipe, new Vector3(side * 5.45f, 5.65f, half), new Vector3(0.12f, 21f, 0.12f),
                     Quaternion.Euler(90f, 0f, 0f));
+                b.Cylinder(mats.Metal, new Vector3(side * 5.18f, 5.38f, half), new Vector3(0.06f, 21f, 0.06f),
+                    Quaternion.Euler(90f, 0f, 0f));
+                for (int i = 0; i < 6; i++)
+                {
+                    float z = 4f + i * 8f;
+                    b.Box(mats.Metal, new Vector3(side * 5.45f, 5.65f, z), new Vector3(0.2f, 0.28f, 0.1f));
+                    b.Box(mats.Trim, new Vector3(side * 5.78f, 4.95f, z + 3f), new Vector3(0.14f, 0.7f, 0.42f));
+                }
             }
             b.Box(mats.GroundDark, new Vector3(0f, 7f, half), new Vector3(13f, 1f, SegmentLength));
             for (int i = 0; i < 4; i++)
@@ -604,6 +764,20 @@ namespace NeonVelocity.World
                 b.Box(mats.Neon, new Vector3(0f, 5.02f, z), new Vector3(7f, 0.06f, 0.2f));
                 b.Box(mats.NeonAlt, new Vector3(-4.6f, 4.2f, z), new Vector3(0.1f, 0.2f, 0.5f));
                 b.Box(mats.Metal, new Vector3(0f, 6.2f, z), new Vector3(12f, 0.08f, 0.12f));
+            }
+
+            // Suspended station name and departure board over the tracks.
+            b.Box(mats.Metal, new Vector3(0f, 6.1f, 20f), new Vector3(9.4f, 0.08f, 0.08f));
+            b.Box(mats.Sign, new Vector3(0f, 5.55f, 20f), new Vector3(4.8f, 0.72f, 0.08f));
+            b.Box(mats.Neon, new Vector3(0f, 5.15f, 20f), new Vector3(3.9f, 0.05f, 0.06f));
+            b.Box(mats.Metal, new Vector3(-2.1f, 5.85f, 20f), new Vector3(0.06f, 1.1f, 0.06f));
+            b.Box(mats.Metal, new Vector3(2.1f, 5.85f, 20f), new Vector3(0.06f, 1.1f, 0.06f));
+            b.Box(mats.Billboard, new Vector3(0f, 4.55f, 36f), new Vector3(3.3f, 0.5f, 0.08f));
+            b.Box(mats.Metal, new Vector3(0f, 4.86f, 36f), new Vector3(3.5f, 0.06f, 0.08f));
+            for (int side = -1; side <= 1; side += 2)
+            {
+                b.Quad(mats.WetGlow, new Vector3(side * 5.25f, 0.374f, 38f),
+                    new Vector3(1.1f, 2.8f, 1f), Quaternion.Euler(90f, 0f, 0f));
             }
         }
 
@@ -1004,6 +1178,10 @@ namespace NeonVelocity.World
 
             public void Cylinder(Material mat, Vector3 position, Vector3 scale, Quaternion? rotation = null) =>
                 Add(PrimitiveMeshes.Cylinder, mat, position, scale, rotation ?? Quaternion.identity);
+
+            /// <summary>Flat textured card used for soft wet-light reflections and signage glow.</summary>
+            public void Quad(Material mat, Vector3 position, Vector3 scale, Quaternion? rotation = null) =>
+                Add(PrimitiveMeshes.Quad, mat, position, scale, rotation ?? Quaternion.identity);
 
             private void Add(Mesh mesh, Material mat, Vector3 position, Vector3 scale, Quaternion rotation)
             {

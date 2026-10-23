@@ -121,6 +121,29 @@ namespace NeonVelocity.Utilities
             }
             yield return Capture("gameplay-02.png");
 
+            // Accelerate through the deterministic biome cycle so the subway/station pass is
+            // captured too. Hazards are cleared while fast-forwarding, so this remains a visual
+            // smoke test rather than a claim that the run was played at normal speed.
+            bool reachedTunnel = false;
+            if (app.Session != null && app.Session.Track != null && !app.Session.IsFinished)
+            {
+                Time.timeScale = 4f;
+                float accelerateUntil = Time.realtimeSinceStartup + 22f;
+                while (Time.realtimeSinceStartup < accelerateUntil)
+                {
+                    KeepRunSafe(app);
+                    if (app.Session.Track.CurrentBiome % 4 == 3)
+                    {
+                        reachedTunnel = true;
+                        break;
+                    }
+                    yield return null;
+                }
+                Time.timeScale = 1f;
+                yield return new WaitForSecondsRealtime(0.8f);
+                if (reachedTunnel) yield return Capture("gameplay-tunnel.png");
+            }
+
             if (app.Session != null && !app.Session.IsFinished)
             {
                 app.ShowPause();

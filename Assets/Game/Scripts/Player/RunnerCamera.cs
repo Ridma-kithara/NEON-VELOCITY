@@ -17,6 +17,7 @@ namespace NeonVelocity.Player
         private Transform _target;
         private RunnerController _runner;
         private float _shake;
+        private float _landingKick;
         private float _time;
         private bool _reducedMotion;
         private bool _shakeEnabled;
@@ -47,6 +48,7 @@ namespace NeonVelocity.Player
             _reducedMotion = reducedMotion;
             _shakeEnabled = shakeEnabled;
             _graphicsScale = graphicsScale;
+            if (_runner != null) _runner.Landed += OnLanded;
             Camera = gameObject.AddComponent<Camera>();
             Camera.clearFlags = CameraClearFlags.SolidColor;
             Camera.backgroundColor = Palette.Hex("#06101F");
@@ -144,6 +146,19 @@ namespace NeonVelocity.Player
             _shake = Mathf.Min(0.7f, _shake + amount);
         }
 
+        private void OnLanded(float impact)
+        {
+            float weight = Mathf.Clamp01(impact / 11f);
+            _landingKick = Mathf.Min(0.3f, _landingKick + 0.1f + weight * 0.16f);
+            if (_reducedMotion) _landingKick *= 0.35f;
+            if (!_reducedMotion) Shake(0.04f + weight * 0.12f);
+        }
+
+        private void OnDestroy()
+        {
+            if (_runner != null) _runner.Landed -= OnLanded;
+        }
+
         public void SetBiomeColor(Color color)
         {
             _neon = color;
@@ -184,7 +199,13 @@ namespace NeonVelocity.Player
                 _shake = Mathf.Max(0f, _shake - dt * 2.8f);
             }
 
+            // A short downward hitch sells the weight of a landing without moving the aim
+            // target or interfering with the reduced-motion setting.
+            _landingKick = Mathf.Lerp(_landingKick, 0f, 1f - Mathf.Exp(-dt * 7f));
+            transform.position += Vector3.down * (_landingKick * (_reducedMotion ? 0.08f : 0.2f));
+
             float targetFov = _fovBase + speedNorm * 9f + (_runner.IsSliding ? 2f : 0f);
+            targetFov -= _landingKick * (_reducedMotion ? 5f : 12f);
             if (_reducedMotion) targetFov = _fovBase + speedNorm * 3f;
             Camera.fieldOfView = Mathf.Lerp(Camera.fieldOfView, targetFov, 1f - Mathf.Exp(-dt * 3f));
             if (_bloom != null)

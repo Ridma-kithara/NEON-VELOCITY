@@ -335,6 +335,93 @@ namespace NeonVelocity.Utilities
             return macro * 0.6f + fine * 0.4f - Mathf.Pow(Mathf.Clamp01(ridge), 22f) * 0.35f;
         }
 
+        private static Texture2D _armorSurface;
+        private static Texture2D _armorNormal;
+
+        /// <summary>
+        /// Original, tileable armour surface. It is intentionally close to neutral grey so each
+        /// runner's paint colour can be applied as a material tint while the micro-scratches,
+        /// brushed grain and recessed panel seams remain readable under rim lighting.
+        /// </summary>
+        public static Texture2D ArmorSurface()
+        {
+            if (_armorSurface != null) return _armorSurface;
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true)
+            {
+                name = "NV_ArmorSurface",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                anisoLevel = 4
+            };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float nx = x / (float)size;
+                float ny = y / (float)size;
+                float grain = Fbm(nx, ny, 26, 771) * 0.18f + (Hash01(x, y, 913) - 0.5f) * 0.03f;
+                float brushed = (Mathf.Sin((ny * 420f) + Fbm(nx, ny, 7, 319) * 8f) * 0.5f + 0.5f) * 0.035f;
+                float broad = Fbm(nx, ny, 4, 117) * 0.10f;
+                float scratch = Mathf.Pow(1f - Mathf.Abs(Fbm(nx * 1.4f, ny * 0.22f, 18, 557) * 2f - 1f), 22f);
+                float seamX = Mathf.Min(x % 128, 128 - x % 128);
+                float seamY = Mathf.Min(y % 128, 128 - y % 128);
+                float seam = Mathf.Min(Mathf.Clamp01(seamX / 1.5f), Mathf.Clamp01(seamY / 1.5f));
+                float value = 0.60f + broad + grain + brushed - scratch * 0.16f;
+                value *= Mathf.Lerp(0.74f, 1f, seam);
+                byte v = (byte)(Mathf.Clamp01(value) * 255f);
+                pixels[y * size + x] = new Color32(v, v, (byte)Mathf.Min(255, v + 2), 255);
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            _armorSurface = tex;
+            return tex;
+        }
+
+        /// <summary>Tangent-space normal detail for the armour milled surface and edge wear.</summary>
+        public static Texture2D ArmorNormal()
+        {
+            if (_armorNormal != null) return _armorNormal;
+            const int size = 256;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true, true)
+            {
+                name = "NV_ArmorNormal",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                anisoLevel = 4
+            };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float center = ArmorHeight(x, y, size);
+                float dx = ArmorHeight((x + 1) % size, y, size) - ArmorHeight((x - 1 + size) % size, y, size);
+                float dy = ArmorHeight(x, (y + 1) % size, size) - ArmorHeight(x, (y - 1 + size) % size, size);
+                Vector3 n = new Vector3(-dx * 2.4f, -dy * 2.4f, 1f).normalized;
+                pixels[y * size + x] = new Color32(
+                    (byte)((n.x * 0.5f + 0.5f) * 255f),
+                    (byte)((n.y * 0.5f + 0.5f) * 255f),
+                    (byte)((n.z * 0.5f + 0.5f) * 255f), 255);
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            _armorNormal = tex;
+            return tex;
+        }
+
+        private static float ArmorHeight(int x, int y, int size)
+        {
+            float nx = x / (float)size;
+            float ny = y / (float)size;
+            float brushed = Mathf.Sin((ny * 420f) + Fbm(nx, ny, 7, 319) * 8f) * 0.007f;
+            float grain = Fbm(nx, ny, 26, 771) * 0.035f;
+            float scratch = Mathf.Pow(1f - Mathf.Abs(Fbm(nx * 1.4f, ny * 0.22f, 18, 557) * 2f - 1f), 22f);
+            float seamX = Mathf.Min(x % 128, 128 - x % 128);
+            float seamY = Mathf.Min(y % 128, 128 - y % 128);
+            float seam = Mathf.Min(Mathf.Clamp01(seamX / 1.5f), Mathf.Clamp01(seamY / 1.5f));
+            return grain + brushed - scratch * 0.05f + (1f - seam) * 0.008f;
+        }
+
         /// <summary>Tileable concrete/metal-deck albedo with panel seams and damp stains.</summary>
         public static Texture2D Concrete(int seed, int size = 256)
         {

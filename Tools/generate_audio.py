@@ -468,6 +468,68 @@ def sfx_nearmiss() -> List[float]:
     return buffer
 
 
+def sfx_step_wet(seed: int) -> List[float]:
+    duration = 0.18
+    buffer = filtered_noise(duration, 1900.0, 0.30, seed=seed, high_pass=True)
+    low = filtered_noise(duration, 210.0, 0.28, seed=seed + 7)
+    for i in range(len(buffer)):
+        t = i / SAMPLE_RATE
+        buffer[i] = buffer[i] * exp_env(t, 0.026) + low[i] * exp_env(t, 0.055) * 0.72
+        buffer[i] += math.sin(TAU * (82.0 - 24.0 * t / duration) * t) * exp_env(t, 0.04) * 0.34
+    return buffer
+
+
+def sfx_step_metal() -> List[float]:
+    duration = 0.16
+    buffer = filtered_noise(duration, 4200.0, 0.24, seed=1401, high_pass=True)
+    for i in range(len(buffer)):
+        t = i / SAMPLE_RATE
+        env = exp_env(t, 0.023)
+        buffer[i] = buffer[i] * env + math.sin(TAU * 430.0 * t) * env * 0.16
+        buffer[i] += math.sin(TAU * 116.0 * t) * exp_env(t, 0.045) * 0.3
+    return buffer
+
+
+def sfx_lane() -> List[float]:
+    duration = 0.24
+    buffer = filtered_noise(duration, 2600.0, 0.2, seed=1501, high_pass=True)
+    phase = 0.0
+    for i in range(len(buffer)):
+        t = i / SAMPLE_RATE
+        frequency = 260.0 + 1060.0 * (t / duration) ** 0.55
+        phase += TAU * frequency / SAMPLE_RATE
+        envelope = math.sin(math.pi * min(1.0, t / duration))
+        buffer[i] = buffer[i] * 0.4 * envelope + math.sin(phase) * envelope * 0.14
+    return buffer
+
+
+def sfx_thunder() -> List[float]:
+    duration = 3.4
+    buffer = filtered_noise(duration, 140.0, 0.48, seed=1601)
+    deep = filtered_noise(duration, 58.0, 0.52, seed=1602)
+    for i in range(len(buffer)):
+        t = i / SAMPLE_RATE
+        swell = math.sin(math.pi * min(1.0, t / 0.16)) * exp_env(t, 1.15)
+        crack = exp_env(t, 0.045) * 0.35
+        buffer[i] = (buffer[i] * 1.15 + deep[i] * 0.55) * swell + buffer[i] * crack
+        buffer[i] += math.sin(TAU * (44.0 - 8.0 * t / duration) * t) * swell * 0.3
+    return buffer
+
+
+def sfx_train_pass() -> List[float]:
+    duration = 4.2
+    buffer = filtered_noise(duration, 520.0, 0.34, seed=1701)
+    rumble = filtered_noise(duration, 85.0, 0.4, seed=1702)
+    for i in range(len(buffer)):
+        t = i / SAMPLE_RATE
+        envelope = math.sin(math.pi * min(1.0, t / duration)) ** 1.5
+        doppler = 245.0 - 92.0 * min(1.0, t / duration)
+        buffer[i] = (buffer[i] + rumble[i]) * envelope
+        buffer[i] += math.sin(TAU * doppler * t) * envelope * 0.16
+        buffer[i] += math.sin(TAU * 390.0 * t + math.sin(TAU * 0.6 * t)) * envelope * 0.045
+    return buffer
+
+
 def sfx_daily() -> List[float]:
     buffer = [0.0] * int(1.1 * SAMPLE_RATE)
     for index, freq in enumerate((1046.5, 1318.5, 1568.0, 2093.0)):
@@ -498,6 +560,12 @@ BUILDERS: List[Tuple[str, Callable[[], List[float]], float]] = [
     ("sfx_defeat", sfx_defeat, 0.85),
     ("sfx_nearmiss", sfx_nearmiss, 0.70),
     ("sfx_daily", sfx_daily, 0.80),
+    ("sfx_step_wet_1", lambda: sfx_step_wet(1301), 0.84),
+    ("sfx_step_wet_2", lambda: sfx_step_wet(1307), 0.84),
+    ("sfx_step_metal", sfx_step_metal, 0.84),
+    ("sfx_lane", sfx_lane, 0.80),
+    ("sfx_thunder", sfx_thunder, 0.88),
+    ("sfx_train_pass", sfx_train_pass, 0.82),
 ]
 
 

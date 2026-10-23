@@ -18,12 +18,12 @@ This report records the defects found during the audit, the fixes applied, the c
 | Unity PlayMode tests | **8 / 8 passed** | Executed |
 | Headless gameplay-core tests | **50 / 50 passed** | Executed |
 | Python multiplayer authority tests | **9 / 9 passed** (10.4 s) | Executed |
-| Static project integrity | **667 / 667 checks passed** | Executed |
+| Static project integrity | **709 / 709 checks passed** | Executed |
 | macOS universal player build | **Succeeded**, 117.0 MiB, x86_64 + ARM64 | Executed |
 | Built player launch / capture run | Completed without runtime exceptions | Executed |
-| UI captures at 1600 × 900 | menu, settings, shop/garage, mode select, gameplay ×2, pause inspected | Executed |
-| UI captures at 1280 × 800 (16:10) | Same seven screens inspected | Executed |
-| 4K render/capture at 3840 × 2160 | Same seven screens; PNGs confirmed 3840 × 2160 | Executed |
+| UI captures at 1600 × 900 | menu, settings, shop/garage, mode select, gameplay ×2, subway/station, pause inspected | Executed |
+| UI captures at 1280 × 800 (16:10) | Same eight screens inspected | Executed |
+| 4K render/capture at 3840 × 2160 | Same eight screens, including the subway; PNGs confirmed 3840 × 2160 | Executed |
 | Physical 4K display output | Not available | Unverified |
 | Windows / Linux / Android / iOS builds | Platform modules not available/verified | Unverified |
 | Real-device touch, controller, audio, suspend/resume | No test devices | Unverified |
@@ -201,7 +201,7 @@ The 4K result is an actual 3840 × 2160 backbuffer/screenshot produced by the bu
 
 **Files:** `Assets/Game/Scripts/Utilities/VisualCaptureRunner.cs`
 
-**Fix:** Extended the capture harness to seven screens and added `-nv-capture-size`, explicitly requesting windowed resolution and capturing actual backbuffer screenshots. Ran 1600 × 900, 1280 × 800 and 3840 × 2160.
+**Fix:** Extended the capture harness to eight screens and added `-nv-capture-size`, explicitly requesting windowed resolution and capturing actual backbuffer screenshots. Ran 1600 × 900, 1280 × 800 and 3840 × 2160.
 
 **Test:** Verified PNG dimensions with `sips`; inspected menu, settings, shop, modes, gameplay and pause at all three sizes.
 
@@ -225,6 +225,22 @@ The 4K result is an actual 3840 × 2160 backbuffer/screenshot produced by the bu
 
 **Limitation:** Actual Android system Back mapping is unverified.
 
+### QA-13 — High — Environment biome could disagree with the generated track
+
+**Root cause:** `TrackManager` reported `currentIndex / 4 % 4` as the active biome, while `TrackDirector` keeps the first eight segments in the city and then applies a seed-dependent rotation offset. With a non-zero offset, lighting, rain, ambience and the capture harness could switch to a different biome than the geometry the runner was actually on. The earlier tunnel capture exposed this: it showed a reactor-style scene while the UI reported a tunnel biome.
+
+**Files:** `Assets/Game/Scripts/World/TrackManager.cs`
+
+**Fix:** `TrackManager.Tick` now reads `BiomeIndex` from the director's authoritative `SegmentPlan` for the current index. The environment therefore follows the same seeded rotation as the track, including the city-only opening.
+
+**Test:** Rebuilt the player and ran the capture harness with time acceleration. The harness reached a real tunnel at 351 m, 519 m and 697 m in different runs (the first tunnel index depends on the run seed) and captured visible ceiling ribs, wall signage, platform edge/columns and overhead station boards. No runtime exceptions were logged.
+
+**Result:** Passed for the captured runs.
+
+**Limitation:** The capture fast-forwards with `Time.timeScale = 4` and clears nearby hazards, so it is a visual smoke test of the generated biome, not proof of a normal-speed manual tunnel playthrough.
+
+---
+
 ## 3. Additional implementation work completed during the pass
 
 These are product/quality improvements rather than regressions:
@@ -239,6 +255,11 @@ These are product/quality improvements rather than regressions:
 - HUD/pause/toast polish; path: `HUDScreen.cs`, `UIRoot.cs`.
 - Expanded automated coverage; paths: `Assets/Game/Tests/EditMode/CoreGameplayTests.cs`, `SaveServiceTests.cs`, `Assets/Game/Tests/PlayMode/NavigationTests.cs`.
 - Repeatable multi-screen/4K capture harness; path: `VisualCaptureRunner.cs`.
+- Layered beveled armour, articulated hands/feet, generated armour albedo/normal/height textures, contact shadow and landing/jump/slide poses; paths: `RunnerVisuals.cs`, `PrimitiveMeshes.cs`, `TextureFactory.cs`, `MaterialLibrary.cs`.
+- Footstep, lane-whoosh, thunder and train pass-by synthesis plus a pooled spatial one-shot path; paths: `AudioManager.cs`, `RunnerController.cs`, `EnvironmentController.cs`, `Tools/generate_audio.py`, `Assets/Game/Resources/Audio`.
+- Wet asphalt reflection cards, storefront mullions/doorways/light pools, tiered facades and a subway-station pass with platforms, columns, benches, route maps and suspended signage; path: `TrackManager.cs`.
+- Landing weight through a short camera dip and FOV punch, gated by reduced motion; paths: `RunnerCamera.cs`, `RunnerController.cs`.
+- Authoritative biome reporting so environment and audio match the seeded track plan; path: `TrackManager.cs`.
 
 ## 4. Remaining limitations and unverified work
 
@@ -250,10 +271,11 @@ These are not reported as fixed:
 4. **Controller and accessibility:** keyboard/controller code paths exist and some are covered indirectly, but focus order, remapping, vibration and real-device gamepad navigation were not tested. No screen-reader/color-blind palette support.
 5. **Multiplayer:** the Python authority passes 9/9 loopback integration tests. A real two- or five-client Unity race, reconnect through the UI, latency/loss conditions and NAT/TLS deployment were not tested.
 6. **Performance:** no CPU/GPU/memory/thermal profiling. 60 FPS at 4K is a goal, not a measured result.
-7. **Content:** art/audio are original procedural primitives/synthesis. They are not equivalent to authored AAA character/environment assets; modular cosmetics share one primitive rig and are visual-only.
+7. **Content:** art/audio are original procedural primitives/synthesis. The armour pass adds generated textures and layered geometry, but it is not equivalent to authored AAA character/environment assets; modular cosmetics still share one procedural rig and are visual-only.
 8. **Testing depth:** the automated suite covers the menu/practice bootstrap, jump clearance, navigation, modal priority, garage lifecycle, purchase confirmation, settings clamps/presets and core/backend rules. It does not exercise every power-up, obstacle, mode, button or failure path.
 9. **Signing/release:** the macOS app is ad-hoc signed and not notarised. No store packaging, privacy metadata or release pipeline exists.
 10. **Save safety:** purchase tests avoid writing the real profile; a full disposable-profile purchase/restore test remains to be added.
+11. **Audio quality:** all 27 synthesized clips load in the player and the new spatial one-shots produced no missing-resource errors, but no listening test, loudness measurement or device-output validation was performed.
 
 ## 5. How the final checks were run
 
@@ -291,6 +313,6 @@ python3 Tools/validate_project.py
 
 ## 6. Honest conclusion
 
-The tested macOS build is substantially more stable and more polished than the baseline: contextual navigation works on the covered routes, the 4K UI is legible, the shop has a working garage preview and purchase confirmation, the HUD no longer shows empty/clipped panels, and the game builds and runs without runtime exceptions in the capture flow. The visual target is closer to the supplied neon-cyberpunk reference, but it remains an original procedural interpretation rather than a AAA photoreal production.
+The tested macOS build is substantially more stable and more polished than the baseline: contextual navigation works on the covered routes, the 4K UI is legible, the shop has a working garage preview and purchase confirmation, the HUD no longer shows empty/clipped panels, the runner has layered procedural armour with generated materials, footsteps and spatial event audio load, wet-road reflections and the subway station render, and biome lighting now follows the authoritative seeded track plan. The game builds and runs without runtime exceptions in the capture flow. The visual target is closer to the supplied neon-cyberpunk reference, but it remains an original procedural interpretation rather than a AAA photoreal production.
 
 Do not treat this report as proof that "all bugs are fixed." It records what was implemented and what was actually executed; the platform, device, network and performance gaps in section 4 remain open.

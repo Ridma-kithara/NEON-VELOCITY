@@ -14,20 +14,21 @@ This report separates checks that were actually executed from work that remains 
 |---|---|---|
 | Headless gameplay-core tests (`Tools/CoreTests`) | **50 / 50 passed** | Executed |
 | Python authority integration tests (`Backend/tests`) | **9 / 9 passed** in 10.4 s | Executed |
-| Static project integrity (`Tools/validate_project.py`) | **667 / 667 checks passed** | Executed |
-| Unity 6000.6.7f1 project import and script compilation | **0 errors**; warnings cleaned | Executed |
+| Static project integrity (`Tools/validate_project.py`) | **709 / 709 checks passed** | Executed |
+| Unity 6000.6.7f1 project import and script compilation | **0 errors** in the final build/capture path | Executed |
 | Unity EditMode tests | **24 / 24 passed** | Executed |
 | Unity PlayMode tests | **8 / 8 passed** | Executed |
 | macOS universal player build | **Succeeded** (117.0 MiB, x86_64 + ARM64) | Executed |
 | macOS player launch | **Launched**, booted menu and completed capture run without runtime exceptions | Executed |
-| In-app UI/gameplay visual capture | **7 screens captured and inspected** at 1600×900 and 1280×800 | Executed |
-| 4K render/capture | **Actual 3840×2160 PNGs** for all 7 screens; UI inspected | Executed |
+| In-app UI/gameplay visual capture | **8 screens captured and inspected** at 1600×900 and 1280×800, including a real subway/station frame | Executed |
+| 4K render/capture | **Actual 3840×2160 PNGs** for all 8 screens; UI/gameplay inspected | Executed |
 | WebGL player build | Not built | Unverified |
 | Windows/Linux player builds | Not built | Unverified |
 | Android APK/AAB | Not built | Unverified |
 | iOS Xcode export | Not built | Unverified |
 | Full manual playthrough of every mode | Not completed | Unverified |
 | Real-device touch/gamepad/audio | Not performed | Unverified |
+| Audible mix / loudness / spatial balance | 27 clips loaded without missing-resource errors; not auditioned | Unverified |
 | Real-network two/five-client race | Not performed | Unverified |
 | Performance/memory profiling, signing/notarisation | Not performed | Unverified |
 
@@ -164,9 +165,9 @@ The app is ad-hoc signed (`Signature=adhoc`) and has no Developer ID or notarisa
 
 ### Visual capture pass
 
-The built player was run with the developer-only `-nv-capture <directory> [-nv-capture-size WxH]` switch. The harness captured seven screens through `ScreenCapture`: main menu, settings, shop/garage, mode select, two live Practice frames and pause.
+The built player was run with the developer-only `-nv-capture <directory> [-nv-capture-size WxH]` switch. The harness captured eight screens through `ScreenCapture`: main menu, settings, shop/garage, mode select, two live Practice frames, a subway/station frame and pause. The subway frame is reached by temporarily accelerating game time with `Time.timeScale = 4` and clearing nearby hazards; it is a visual smoke test of the seeded biome, not a normal-speed manual playthrough.
 
-The pass was repeated at **1600×900**, **1280×800 (16:10)** and **3840×2160**. `sips` confirmed the PNG dimensions; the 4K files are genuinely 3840×2160. The menu, runner card, garage turntable, mode cards, wet road, sidewalks, skyline, neon signage, rain, HUD and pause overlay were inspected at each size. This is an automated visual/UI smoke check, not a full manual playthrough; physical 4K-display behaviour and 4K frame rate remain unverified.
+The pass was repeated at **1600×900**, **1280×800 (16:10)** and **3840×2160**. `sips` confirmed the PNG dimensions; the 4K files are genuinely 3840×2160. The menu, runner card, garage turntable, mode cards, beveled runner, wet road, sidewalks, tiered facades, storefront detail, subway ceiling/walls/platform edge/columns/signage, rain, HUD and pause overlay were inspected at each size. The final builds also logged no missing audio resources or stripped-shader errors while the new footstep/lane/thunder/train clips were loaded. This is an automated visual/UI smoke check, not a full manual playthrough or listening test; physical 4K-display behaviour, 4K frame rate and audio balance remain unverified.
 
 ## 8. Static project integrity
 
@@ -179,13 +180,13 @@ python3 Tools/validate_project.py
 **Result**
 
 ```text
-[meta] 111 assets, 111 unique GUIDs
+[meta] 117 assets, 117 unique GUIDs
 [scene] build GUID b8e4b52cd50888fb8d01b634add84552
 [branding] RK VANTAGE GAMES / NEON VELOCITY / games.rkvantage.neonvelocity
-[audio] 21 mono PCM clips, 64.4s total
+[audio] 27 mono PCM clips, 72.8s total
 [sources] 48 runtime/editor scripts, 4 Unity test scripts
 [docs] required documentation present
-PASS: 667 checks
+PASS: 709 checks
 ```
 
 The validator checks meta/GUID integrity, build-scene configuration, empty boot scene, branding, orientation, Input System, colour space, Android settings, audio format, source markers and required documentation.
@@ -195,6 +196,7 @@ The validator checks meta/GUID integrity, build-scene configuration, empty boot 
 | Gap | Reason |
 |---|---|
 | Full manual playthrough of all 11 modes | Not completed; PlayMode covers Practice plus a jump regression and UI routes |
+| Audible audio mix and spatial balance | Clips load without missing-resource errors; trigger path not audibly validated and no loudness measurement was performed |
 | Every power-up, pickup, upgrade, collision and result path | Not individually exercised at runtime |
 | Physical 4K display, HDR and 4K frame rate | 3840×2160 backbuffer capture succeeded, but only a 1600×900 host display was available |
 | Final confirmed shop purchase/debit on a disposable profile | Modal/no-charge/no-stacking guard is tested; confirmed debit is guarded in code but not exercised end-to-end |
@@ -217,7 +219,7 @@ The validator checks meta/GUID integrity, build-scene configuration, empty boot 
 # 2. 9 authority integration tests
 python3 -m unittest discover -s Backend/tests -v
 
-# 3. 667 static checks
+# 3. 709 static checks
 python3 Tools/validate_project.py
 
 # 4. Unity EditMode tests
