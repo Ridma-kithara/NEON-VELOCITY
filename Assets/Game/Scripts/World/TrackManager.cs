@@ -114,8 +114,8 @@ namespace NeonVelocity.World
                 var m = new ThemeMaterials
                 {
                     Ground = MaterialLibrary.LitTextured("NV_AsphaltMat_" + i, asphalt,
-                        Color.Lerp(theme.ground, Color.white, 0.34f), 0.08f, 0.84f,
-                        new Vector2(2.4f, 10f), asphaltNormal, new Vector2(2.4f, 10f), 1.25f),
+                        Color.Lerp(theme.ground, Color.white, 0.24f), 0.22f, 0.94f,
+                        new Vector2(2.4f, 10f), asphaltNormal, new Vector2(2.4f, 10f), 1.05f),
                     GroundDark = MaterialLibrary.LitTextured("NV_DeckMat_" + i, concrete,
                         Color.Lerp(theme.ground, Palette.Void, 0.48f), 0.25f, 0.42f,
                         new Vector2(2f, 8f)),
@@ -141,13 +141,16 @@ namespace NeonVelocity.World
                     Pipe = MaterialLibrary.Lit(Color.Lerp(theme.buildingA, theme.accent, 0.12f), 0.8f, 0.7f),
                     White = MaterialLibrary.Lit(Palette.White, 0.2f, 0.8f, Palette.White, 1.2f)
                 };
-                // Window facades use a generated repeating texture and unlit shader for legibility.
+                // Window facades are HDR-tinted so scattered lit windows bleed into bloom while
+                // the unlit mullions stay deep and the silhouette remains readable at speed.
                 var texA = TextureFactory.WindowFacade(3301 + i);
                 var texB = TextureFactory.WindowFacade(9901 + i);
+                Color facadeATint = Color.Lerp(theme.buildingA, Color.white, 0.62f) * 1.42f;
+                Color facadeBTint = Color.Lerp(theme.buildingB, Color.white, 0.58f) * 1.36f;
                 m.BuildingA = MaterialLibrary.UnlitTextured("NV_WinA_" + i, texA,
-                    Color.Lerp(theme.buildingA, Color.white, 0.25f), new Vector2(2f, 3f));
+                    facadeATint, new Vector2(2f, 3f));
                 m.BuildingB = MaterialLibrary.UnlitTextured("NV_WinB_" + i, texB,
-                    Color.Lerp(theme.buildingB, Color.white, 0.22f), new Vector2(3f, 2f));
+                    facadeBTint, new Vector2(3f, 2f));
                 _themeMaterials[i] = m;
             }
         }

@@ -113,8 +113,21 @@ namespace NeonVelocity.Core
         public float sfxVolume = 0.8f;
         public float ambienceVolume = 0.5f;
         public float swipeSensitivity = 1f;
-        public int graphicsPreset = 2; // 0 Low, 1 Medium, 2 High, 3 Ultra
+        public int graphicsPreset = 2; // 0 Low, 1 Medium, 2 High, 3 Ultra, 4 Custom
         public int targetFrameRate = 60;
+        // Desktop display configuration. Width/height of 0 means "leave the current desktop
+        // mode untouched"; mobile builds ignore these fields entirely.
+        public int screenWidth;
+        public int screenHeight;
+        public int fullscreenMode; // 0 windowed, 1 borderless, 2 exclusive where supported
+        public bool vSync;
+        public float renderScale = 1f;
+        public int textureQuality; // 0 full, 1 half, 2 quarter (mipmap limit)
+        public int shadowQuality = 2; // 0 off, 1 low, 2 high, 3 ultra
+        public int reflectionQuality = 2; // 0 off, 1 standard, 2 high
+        public int antiAliasing = 2; // 0 off, 2x, 4x, 8x
+        public int effectsQuality = 2; // 0 low, 1 medium, 2 high
+        public int viewDistance = 2; // 0 near, 1 standard, 2 far
         public bool cameraShake = true;
         public bool reducedMotion = false;
         public bool vibration = true;
@@ -221,8 +234,21 @@ namespace NeonVelocity.Core
             s.sfxVolume = Clamp01(s.sfxVolume);
             s.ambienceVolume = Clamp01(s.ambienceVolume);
             s.swipeSensitivity = Math.Max(0.4f, Math.Min(2.5f, s.swipeSensitivity));
-            s.graphicsPreset = Math.Max(0, Math.Min(3, s.graphicsPreset));
-            s.targetFrameRate = s.targetFrameRate == 30 ? 30 : (s.targetFrameRate == 144 ? 144 : 60);
+            s.graphicsPreset = Math.Max(0, Math.Min(4, s.graphicsPreset));
+            s.targetFrameRate = s.targetFrameRate == 30 || s.targetFrameRate == 120 ||
+                s.targetFrameRate == 144 ? s.targetFrameRate : 60;
+            s.screenWidth = Math.Max(0, Math.Min(7680, s.screenWidth));
+            s.screenHeight = Math.Max(0, Math.Min(4320, s.screenHeight));
+            if (s.screenWidth > 0 && s.screenHeight <= 0) s.screenWidth = 0;
+            if (s.screenHeight > 0 && s.screenWidth <= 0) s.screenHeight = 0;
+            s.fullscreenMode = Math.Max(0, Math.Min(2, s.fullscreenMode));
+            s.renderScale = Math.Max(0.5f, Math.Min(1f, s.renderScale));
+            s.textureQuality = Math.Max(0, Math.Min(2, s.textureQuality));
+            s.shadowQuality = Math.Max(0, Math.Min(3, s.shadowQuality));
+            s.reflectionQuality = Math.Max(0, Math.Min(2, s.reflectionQuality));
+            s.antiAliasing = s.antiAliasing >= 8 ? 8 : (s.antiAliasing >= 4 ? 4 : (s.antiAliasing >= 2 ? 2 : 0));
+            s.effectsQuality = Math.Max(0, Math.Min(2, s.effectsQuality));
+            s.viewDistance = Math.Max(0, Math.Min(2, s.viewDistance));
             if (s.serverPort < 1 || s.serverPort > 65535) s.serverPort = 7777;
             if (string.IsNullOrWhiteSpace(s.serverHost)) s.serverHost = "127.0.0.1";
         }

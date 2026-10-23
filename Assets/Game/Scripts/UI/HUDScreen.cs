@@ -37,6 +37,7 @@ namespace NeonVelocity.UI
         private Text _runOver;
         private Text _windowLabel;
         private Image _flash;
+        private GameObject _onlinePanel;
         private RectTransform _effectsRow;
         private RectTransform _onlineRows;
         private readonly List<Text> _onlineNames = new List<Text>(5);
@@ -79,8 +80,9 @@ namespace NeonVelocity.UI
             BuildCountdown(root);
             BuildWindowTag(root);
 
-            // Pause is always available; it does not consume a swipe on touch.
-            var pause = UITheme.IconButton(root, "Pause", "II", UITheme.Cyan, () => _app.ShowPause(), 54);
+            // Pause is always available; it does not consume a swipe on touch. Keep the glyph
+            // below the 54 px hit box so Unity's truncation cannot hide it.
+            var pause = UITheme.IconButton(root, "Pause", "II", UITheme.Cyan, () => _app.ShowPause(), 30);
             UITheme.Anchor((RectTransform)pause.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
                 new Vector2(-80f, 34f), new Vector2(-26f, 88f));
         }
@@ -180,6 +182,7 @@ namespace NeonVelocity.UI
         {
             var panel = UITheme.Img(root, "Online Panel", new Color(0.03f, 0.06f, 0.11f, 0.78f),
                 UITheme.Rounded, false);
+            _onlinePanel = panel.gameObject;
             UITheme.Anchor((RectTransform)panel.transform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
                 new Vector2(-350f, -210f), new Vector2(-24f, 210f));
             var heading = UITheme.Label(panel.transform, "Heading", "CIRCUIT", UITheme.SmallSize,
@@ -286,7 +289,10 @@ namespace NeonVelocity.UI
             _name.text = _app.Profile != null ? _app.Profile.playerName : "RUNNER";
             _windowLabel.text = session.Mode.Title.ToUpperInvariant() + "  /  " + session.Mode.CodeName;
             if (session.IsOnline) _windowLabel.color = UITheme.Lime;
-            _lives.gameObject.SetActive(session.Mode.StartingLives > 1 || session.Mode.Id == GameModeId.Survival);
+            if (_onlinePanel != null) _onlinePanel.SetActive(session.IsOnline);
+            bool showLives = session.Mode.StartingLives > 1 || session.Mode.Id == GameModeId.Survival;
+            if (_lives.transform.parent != null) _lives.transform.parent.gameObject.SetActive(showLives);
+            _lives.gameObject.SetActive(showLives);
         }
 
         private void Update()

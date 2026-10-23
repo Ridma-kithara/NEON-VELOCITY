@@ -48,11 +48,16 @@ namespace NeonVelocity.World
         private ParticleSystem _snow;
         private readonly List<TrafficVehicle> _traffic = new List<TrafficVehicle>();
         private GameObject _trafficRoot;
+        private GameObject _trainRoot;
+        private GameObject _railRoot;
         private int _biome = -1;
         private float _time;
         private float _flash;
         private bool _reduced;
         private float _quality = 2f;
+        private int _effectsQuality = 2;
+        private int _reflectionQuality = 2;
+        private int _viewDistance = 2;
 
         public int CurrentBiome => _biome;
 
@@ -75,6 +80,14 @@ namespace NeonVelocity.World
             _camera = camera;
             _reduced = reducedMotion;
             _quality = graphicsPreset;
+            if (app != null && app.Profile != null)
+            {
+                var settings = app.Profile.settings;
+                _effectsQuality = settings.effectsQuality;
+                _reflectionQuality = settings.reflectionQuality;
+                _viewDistance = settings.viewDistance;
+                _quality = _effectsQuality;
+            }
 
             RenderSettings.fog = true;
             RenderSettings.fogMode = FogMode.ExponentialSquared;
@@ -103,23 +116,65 @@ namespace NeonVelocity.World
             _rim.color = Palette.Magenta;
             _rim.transform.rotation = Quaternion.Euler(16f, 148f, 0f);
 
-            BuildCameraLights(graphicsPreset);
+            BuildCameraLights();
             BuildDome();
             BuildRain();
             BuildAtmosphere();
             BuildTraffic();
+            BuildSkyTrain();
             if (mode == GameModeId.SeasonalEvent) BuildEmbers();
 
             _track.BiomeChanged += OnBiomeChanged;
             ApplyBiome(_track.CurrentBiome < 0 ? 0 : _track.CurrentBiome, true);
         }
 
-        private void BuildCameraLights(float graphicsPreset)
+        private void BuildCameraLights()
         {
-            if (_camera == null || graphicsPreset < 2) return;
+            if (_camera == null) return;
             _cyanFill = CreateFillLight("Neon Fill Cyan", new Vector3(-4.8f, 2.2f, 7f), Palette.Cyan, 16f, 9f);
             _magentaFill = CreateFillLight("Neon Fill Magenta", new Vector3(4.8f, 2.6f, 7f), Palette.Magenta, 16f, 8f);
             _warmFill = CreateFillLight("Street Fill Warm", new Vector3(0f, 5.8f, 18f), new Color(1f, 0.62f, 0.3f), 26f, 5f);
+            bool enabled = _effectsQuality >= 2;
+            _cyanFill.enabled = enabled;
+            _magentaFill.enabled = enabled;
+            _warmFill.enabled = enabled;
+        }
+
+        public void ApplyVideoSettings(SettingsData settings)
+        {
+            if (settings == null) return;
+            _effectsQuality = settings.effectsQuality;
+            _reflectionQuality = settings.reflectionQuality;
+            _viewDistance = settings.viewDistance;
+            _quality = settings.effectsQuality;
+            if (_rain != null)
+            {
+                var main = _rain.main;
+                main.maxParticles = _reduced ? 250 : Mathf.RoundToInt(1600f * (_effectsQuality + 1));
+            }
+            if (_splash != null)
+            {
+                var main = _splash.main;
+                main.maxParticles = _reduced ? 120 : Mathf.RoundToInt(700f * (_effectsQuality + 1));
+            }
+            if (_sun != null)
+            {
+                _sun.shadows = settings.shadowQuality > 0 ? LightShadows.Soft : LightShadows.None;
+                _sun.intensity = _effectsQuality >= 2 ? 1.18f : (_effectsQuality >= 1 ? 1.0f : 0.68f);
+            }
+            bool fills = _effectsQuality >= 2;
+            if (_cyanFill != null) _cyanFill.enabled = fills;
+            if (_magentaFill != null) _magentaFill.enabled = fills;
+            if (_warmFill != null) _warmFill.enabled = fills;
+            RenderSettings.reflectionIntensity = _reflectionQuality >= 2 ? 1f
+                : (_reflectionQuality >= 1 ? 0.68f : 0.18f);
+            var theme = _theme;
+            if (theme != null)
+            {
+                bool rain = theme.rain || (_app != null && _app.Session != null &&
+                            _app.Session.Mode.Id == GameModeId.SeasonalEvent);
+                SetRain(rain);
+            }
         }
 
         private Light CreateFillLight(string name, Vector3 localPosition, Color color, float range, float intensity)
@@ -338,6 +393,65 @@ namespace NeonVelocity.World
             }
         }
 
+        private void BuildSkyTrain()
+        {
+            _railRoot = new GameObject("Maglev Line");
+            _railRoot.transform.SetParent(transform, false);
+            var railMaterial = MaterialLibrary.Lit(new Color(0.035f, 0.06f, 0.095f), 0.88f, 0.82f);
+            var railGlow = MaterialLibrary.Additive(new Color(0.25f, 0.72f, 1f));
+            for (int side = -1; side <= 1; side += 2)
+            {
+                PrimitiveMeshes.Box(_railRoot.transform, "Rail", new Vector3(38f + side * 1.9f, 14.4f, 70f),
+                    new Vector3(0.22f, 0.22f, 350f), railMaterial);
+                PrimitiveMeshes.Box(_railRoot.transform, "RailGlow", new Vector3(38f + side * 1.78f, 14.33f, 70f),
+                    new Vector3(0.05f, 0.05f, 350f), railGlow);
+            }
+
+            _trainRoot = new GameObject("Sky Train");
+            _trainRoot.transform.SetParent(transform, false);
+            _trainRoot.transform.position = new Vector3(38f, 16f, 110f);
+            var bodyMaterial = MaterialLibrary.Lit(new Color(0.045f, 0.075f, 0.12f), 0.9f, 0.88f);
+            var trimMaterial = MaterialLibrary.Lit(new Color(0.55f, 0.68f, 0.82f), 0.95f, 0.94f);
+            var windowMaterial = MaterialLibrary.Lit(new Color(0.28f, 0.62f, 0.95f), 0.55f, 0.97f,
+                new Color(0.24f, 0.65f, 1f), 1.8f);
+            var underMaterial = MaterialLibrary.Additive(new Color(0.22f, 0.82f, 1f));
+            for (int car = 0; car < 4; car++)
+            {
+                var carRoot = new GameObject("Train Car " + car).transform;
+                carRoot.SetParent(_trainRoot.transform, false);
+                carRoot.localPosition = new Vector3(0f, 0f, -car * 8.6f);
+                PrimitiveMeshes.Box(carRoot, "Body", Vector3.zero, new Vector3(3.4f, 1.25f, 7.7f), bodyMaterial);
+                PrimitiveMeshes.Box(carRoot, "Roof", new Vector3(0f, 0.7f, 0f), new Vector3(3.1f, 0.16f, 7.3f), trimMaterial);
+                PrimitiveMeshes.Box(carRoot, "WindowL", new Vector3(-1.71f, 0.12f, 0f),
+                    new Vector3(0.025f, 0.28f, 6.9f), windowMaterial);
+                PrimitiveMeshes.Box(carRoot, "WindowR", new Vector3(1.71f, 0.12f, 0f),
+                    new Vector3(0.025f, 0.28f, 6.9f), windowMaterial);
+                PrimitiveMeshes.Box(carRoot, "Skirt", new Vector3(0f, -0.63f, 0f),
+                    new Vector3(3.0f, 0.11f, 7.2f), trimMaterial);
+                PrimitiveMeshes.Box(carRoot, "Underglow", new Vector3(0f, -0.71f, 0f),
+                    new Vector3(2.8f, 0.035f, 6.8f), underMaterial);
+                if (car == 0)
+                    PrimitiveMeshes.Box(carRoot, "Headlight", new Vector3(0f, 0.02f, -3.88f),
+                        new Vector3(1.9f, 0.09f, 0.05f), underMaterial);
+            }
+        }
+
+        private void UpdateSkyTrain(float dt, float runnerZ)
+        {
+            if (_trainRoot == null) return;
+            if (_railRoot != null)
+            {
+                var railPos = _railRoot.transform.position;
+                railPos.z = runnerZ + 70f;
+                _railRoot.transform.position = railPos;
+            }
+            var p = _trainRoot.transform.position;
+            p.z -= dt * 26f;
+            p.y = 16f + Mathf.Sin(_time * 0.7f) * 0.06f;
+            if (p.z < runnerZ - 70f) p.z = runnerZ + 195f;
+            _trainRoot.transform.position = p;
+        }
+
         private void PlaceTraffic(TrafficVehicle vehicle, bool initial)
         {
             float z = _runner != null ? _runner.transform.position.z : 0f;
@@ -408,13 +522,14 @@ namespace NeonVelocity.World
             _dome.GetComponent<MeshRenderer>().sharedMaterial = _domeMaterial;
 
             RenderSettings.fogColor = theme.fog;
-            RenderSettings.fogDensity = theme.rain ? 0.0135f : 0.0088f;
+            RenderSettings.fogDensity = theme.rain ? 0.0100f : 0.0068f;
             RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = Color.Lerp(theme.skyTop, theme.accent, 0.12f);
-            RenderSettings.ambientEquatorColor = Color.Lerp(theme.buildingA, theme.accent, 0.18f);
-            RenderSettings.ambientGroundColor = Color.Lerp(theme.ground, Palette.Void, 0.58f);
-            RenderSettings.ambientIntensity = _quality >= 1 ? 1.02f : 0.74f;
-            RenderSettings.reflectionIntensity = 1f;
+            RenderSettings.ambientSkyColor = Color.Lerp(theme.skyTop, theme.accent, 0.16f);
+            RenderSettings.ambientEquatorColor = Color.Lerp(theme.buildingA, theme.accent, 0.22f);
+            RenderSettings.ambientGroundColor = Color.Lerp(theme.ground, Palette.Void, 0.52f);
+            RenderSettings.ambientIntensity = _quality >= 2 ? 1.05f : (_quality >= 1 ? 0.9f : 0.72f);
+            RenderSettings.reflectionIntensity = _reflectionQuality >= 2 ? 1f
+                : (_reflectionQuality >= 1 ? 0.68f : 0.18f);
 
             if (!_reflections.TryGetValue(_biome, out Cubemap reflection))
             {
@@ -442,7 +557,7 @@ namespace NeonVelocity.World
             if (_sun != null)
             {
                 _sun.color = Color.Lerp(new Color(0.72f, 0.84f, 1f), theme.accent, 0.22f);
-                _sun.intensity = _quality >= 2 ? 1.35f : (_quality >= 1 ? 1.0f : 0.55f);
+                _sun.intensity = _quality >= 2 ? 1.18f : (_quality >= 1 ? 1.0f : 0.68f);
             }
             if (_rim != null) _rim.color = Color.Lerp(theme.accent, Palette.Magenta, 0.5f);
 
@@ -451,6 +566,8 @@ namespace NeonVelocity.World
             if (_warmFill != null) _warmFill.color = Color.Lerp(Palette.Amber, theme.accent, 0.12f);
 
             if (_trafficRoot != null) _trafficRoot.SetActive(_biome == 0 || _biome == 1);
+            if (_trainRoot != null) _trainRoot.SetActive(_biome == 0 || _biome == 1);
+            if (_railRoot != null) _railRoot.SetActive(_biome == 0 || _biome == 1);
 
             bool rain = theme.rain || _app != null && _app.Session != null &&
                         _app.Session.Mode.Id == GameModeId.SeasonalEvent;
@@ -465,13 +582,15 @@ namespace NeonVelocity.World
             if (_rain != null)
             {
                 var emission = _rain.emission;
-                emission.rateOverTime = active ? (_reduced ? 90f : 360f) : 0f;
+                float rate = _effectsQuality >= 2 ? 440f : (_effectsQuality >= 1 ? 280f : 150f);
+                emission.rateOverTime = active ? (_reduced ? 80f : rate) : 0f;
                 if (active && !_rain.isPlaying) _rain.Play();
             }
             if (_splash != null)
             {
                 var emission = _splash.emission;
-                emission.rateOverTime = active ? (_reduced ? 35f : 150f) : 0f;
+                float rate = _effectsQuality >= 2 ? 170f : (_effectsQuality >= 1 ? 100f : 50f);
+                emission.rateOverTime = active ? (_reduced ? 30f : rate) : 0f;
                 if (active && !_splash.isPlaying) _splash.Play();
             }
         }
@@ -488,6 +607,7 @@ namespace NeonVelocity.World
             if (_cloudB != null) _cloudB.Rotate(0f, dt * -0.38f, 0f, Space.Self);
 
             if (_trafficRoot != null && _trafficRoot.activeSelf) UpdateTraffic(dt, p.z);
+            if (_trainRoot != null && _trainRoot.activeSelf) UpdateSkyTrain(dt, p.z);
 
             if (_biome == 0 && _flash > 0f) _flash = Mathf.Max(0f, _flash - dt * 5.2f);
             if (_biome == 0 && !_reduced && Time.time > _nextFlash)
@@ -497,7 +617,7 @@ namespace NeonVelocity.World
             }
 
             var theme = _theme;
-            float baseSun = _quality >= 2 ? 1.35f : (_quality >= 1 ? 1.0f : 0.55f);
+            float baseSun = _quality >= 2 ? 1.18f : (_quality >= 1 ? 1.0f : 0.68f);
             if (_sun != null) _sun.intensity = baseSun + _flash * 2.4f;
             if (theme != null)
             {

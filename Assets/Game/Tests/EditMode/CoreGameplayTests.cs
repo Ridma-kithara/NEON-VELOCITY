@@ -84,6 +84,109 @@ namespace NeonVelocity.Tests
         }
 
         [Test]
+        public void GeneratedTrack_OpensInNeonSprawlForEverySeed()
+        {
+            foreach (int seed in new[] { 1, 77, 424242, -90 })
+            {
+                var segments = new TrackDirector(seed, 1009).BuildRange(0, 12);
+                for (int i = 0; i < 8; i++)
+                    Assert.AreEqual(0, segments[i].BiomeIndex,
+                        "seed " + seed + " segment " + i + " must open in Neon Sprawl");
+            }
+        }
+
+        [Test]
+        public void Settings_ClampsHostileDisplayAndQualityValues()
+        {
+            var settings = new SettingsData
+            {
+                graphicsPreset = 99,
+                targetFrameRate = 999,
+                screenWidth = 9000,
+                screenHeight = -4,
+                fullscreenMode = 8,
+                renderScale = 2.5f,
+                textureQuality = -5,
+                shadowQuality = 12,
+                reflectionQuality = -2,
+                antiAliasing = 7,
+                effectsQuality = 9,
+                viewDistance = -1,
+                serverPort = 0,
+                serverHost = "   "
+            };
+
+            SaveMigration.ClampSettings(settings);
+
+            Assert.AreEqual(4, settings.graphicsPreset);
+            Assert.AreEqual(60, settings.targetFrameRate);
+            Assert.AreEqual(0, settings.screenWidth);
+            Assert.AreEqual(0, settings.screenHeight);
+            Assert.AreEqual(2, settings.fullscreenMode);
+            Assert.AreEqual(1f, settings.renderScale, 0.0001f);
+            Assert.AreEqual(0, settings.textureQuality);
+            Assert.AreEqual(3, settings.shadowQuality);
+            Assert.AreEqual(0, settings.reflectionQuality);
+            Assert.AreEqual(4, settings.antiAliasing);
+            Assert.AreEqual(2, settings.effectsQuality);
+            Assert.AreEqual(0, settings.viewDistance);
+            Assert.AreEqual(7777, settings.serverPort);
+            Assert.AreEqual("127.0.0.1", settings.serverHost);
+        }
+
+        [Test]
+        public void Settings_LowPresetIsDeterministicAndComplete()
+        {
+            var settings = new SettingsData { graphicsPreset = 0 };
+            GameApp.ApplyPresetDefaults(settings);
+            Assert.AreEqual(0.67f, settings.renderScale, 0.0001f);
+            Assert.AreEqual(2, settings.textureQuality);
+            Assert.AreEqual(0, settings.shadowQuality);
+            Assert.AreEqual(0, settings.reflectionQuality);
+            Assert.AreEqual(0, settings.antiAliasing);
+            Assert.AreEqual(0, settings.effectsQuality);
+            Assert.AreEqual(0, settings.viewDistance);
+        }
+
+        [Test]
+        public void Settings_UltraPresetUsesFullQuality()
+        {
+            var settings = new SettingsData { graphicsPreset = 3 };
+            GameApp.ApplyPresetDefaults(settings);
+            Assert.AreEqual(1f, settings.renderScale, 0.0001f);
+            Assert.AreEqual(0, settings.textureQuality);
+            Assert.AreEqual(3, settings.shadowQuality);
+            Assert.AreEqual(2, settings.reflectionQuality);
+            Assert.AreEqual(4, settings.antiAliasing);
+            Assert.AreEqual(2, settings.effectsQuality);
+            Assert.AreEqual(2, settings.viewDistance);
+        }
+
+        [Test]
+        public void Settings_CustomPresetPreservesChosenValues()
+        {
+            var settings = new SettingsData
+            {
+                graphicsPreset = 4,
+                renderScale = 0.5f,
+                textureQuality = 1,
+                shadowQuality = 1,
+                reflectionQuality = 0,
+                antiAliasing = 8,
+                effectsQuality = 1,
+                viewDistance = 0
+            };
+            GameApp.ApplyPresetDefaults(settings);
+            Assert.AreEqual(0.5f, settings.renderScale, 0.0001f);
+            Assert.AreEqual(1, settings.textureQuality);
+            Assert.AreEqual(1, settings.shadowQuality);
+            Assert.AreEqual(0, settings.reflectionQuality);
+            Assert.AreEqual(8, settings.antiAliasing);
+            Assert.AreEqual(1, settings.effectsQuality);
+            Assert.AreEqual(0, settings.viewDistance);
+        }
+
+        [Test]
         public void GeneratedTrack_VariesBySeedAndModeSalt()
         {
             var baseline = Describe(new TrackDirector(200, 0).BuildRange(0, 50));

@@ -100,6 +100,25 @@ namespace NeonVelocity.UI
             UITheme.Stretch(rect);
             if (HighContrast) ApplyContrast(screen);
             StartCoroutine(FadeFromBlack(0.22f));
+            StartCoroutine(SelectDefault(screen));
+        }
+
+        private IEnumerator SelectDefault(GameObject screen)
+        {
+            // Wait one frame so layout groups and generated children exist before the first
+            // gamepad/keyboard focus assignment. Header Back is deliberately first, making
+            // controller navigation predictable on every secondary screen.
+            yield return null;
+            if (screen == null || screen != CurrentScreen || _eventSystem == null) yield break;
+            var selectables = screen.GetComponentsInChildren<Selectable>(true);
+            for (int i = 0; i < selectables.Length; i++)
+            {
+                var selectable = selectables[i];
+                if (selectable == null || !selectable.interactable || !selectable.gameObject.activeInHierarchy)
+                    continue;
+                _eventSystem.SetSelectedGameObject(selectable.gameObject);
+                yield break;
+            }
         }
 
         public void CloseScreen()
@@ -138,7 +157,9 @@ namespace NeonVelocity.UI
             rect.anchorMin = new Vector2(0.5f, 1f);
             rect.anchorMax = new Vector2(0.5f, 1f);
             rect.pivot = new Vector2(0.5f, 1f);
-            rect.anchoredPosition = new Vector2(0f, -24f - _toasts.Count * 62f);
+            // In-run feedback must clear the centre timer panel; menu toasts stay at the top.
+            float topOffset = Hud != null && Hud.gameObject.activeInHierarchy ? 150f : 24f;
+            rect.anchoredPosition = new Vector2(0f, -topOffset - _toasts.Count * 62f);
             rect.sizeDelta = new Vector2(560f, 50f);
             var text = UITheme.Label(panel.transform, "Text", message, UITheme.BodySize, color,
                 TextAnchor.MiddleCenter, FontStyle.Bold);

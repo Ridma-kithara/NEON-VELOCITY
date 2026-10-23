@@ -428,19 +428,28 @@ namespace NeonVelocity.Utilities
                 SetPixelSafe(pixels, w, h, w - 6 - band, y, ink);
             }
 
-            int rows = variant % 3 == 0 ? 5 : (variant % 3 == 1 ? 3 : 4);
+            Color32 paleInk = new Color32(
+                (byte)Mathf.Clamp(Mathf.Lerp(accent.r, 1f, 0.55f) * 255f, 0f, 255f),
+                (byte)Mathf.Clamp(Mathf.Lerp(accent.g, 1f, 0.55f) * 255f, 0f, 255f),
+                (byte)Mathf.Clamp(Mathf.Lerp(accent.b, 1f, 0.55f) * 255f, 0f, 255f), 255);
+            // Blocky ideogram-style glyphs read as signage at speed without using any real
+            // language or copyrighted mark. Strokes vary per panel so districts do not repeat.
+            int rows = variant % 3 == 0 ? 4 : 3;
             for (int row = 0; row < rows; row++)
             {
-                int y0 = 30 + row * 38;
-                int bars = 2 + rng.Next(0, 3);
-                for (int bar = 0; bar < bars; bar++)
+                int y0 = 32 + row * 48;
+                for (int glyph = 0; glyph < 3; glyph++)
                 {
-                    int x0 = 18 + rng.Next(0, 62);
-                    int length = 14 + rng.Next(0, 34);
-                    int thickness = 3 + rng.Next(0, 5);
-                    for (int yy = y0; yy < y0 + thickness && yy < h; yy++)
-                    for (int xx = x0; xx < x0 + length && xx < w; xx++)
-                        SetPixelSafe(pixels, w, h, xx, yy, ink);
+                    int gx = 16 + glyph * 36;
+                    Color32 color = ((row + glyph + variant) % 5 == 0) ? paleInk : ink;
+                    int style = rng.Next(0, 4);
+                    FillRect(pixels, w, h, gx, y0, 22, 3, color);
+                    FillRect(pixels, w, h, gx, y0 + 19, 22, 3, color);
+                    FillRect(pixels, w, h, gx, y0, 3, 22, color);
+                    FillRect(pixels, w, h, gx + 19, y0, 3, 22, color);
+                    if (style != 1) FillRect(pixels, w, h, gx + 6, y0 + 8, 10, 3, color);
+                    if (style != 2) FillRect(pixels, w, h, gx + 9, y0 + 4, 3, 14, color);
+                    if (style == 0) FillRect(pixels, w, h, gx + 4, y0 + 15, 14, 3, color);
                 }
             }
 
@@ -524,6 +533,14 @@ namespace NeonVelocity.Utilities
             return cube;
         }
 
+        private static void FillRect(Color32[] pixels, int w, int h, int x, int y, int width, int height,
+            Color32 color)
+        {
+            for (int yy = y; yy < y + height; yy++)
+            for (int xx = x; xx < x + width; xx++)
+                SetPixelSafe(pixels, w, h, xx, yy, color);
+        }
+
         private static void SetPixelSafe(Color32[] pixels, int w, int h, int x, int y, Color32 c)
         {
             if (x < 0 || y < 0 || x >= w || y >= h) return;
@@ -581,22 +598,39 @@ namespace NeonVelocity.Utilities
 
         public static Texture2D WindowFacade(int seed)
         {
-            const int size = 128;
+            const int size = 512;
             var rng = new System.Random(seed);
             var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
             {
-                name = "NV_Facade", wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Point
+                name = "NV_Facade", wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Bilinear
             };
             var pixels = new Color32[size * size];
+            Color32 glass = new Color32(9, 16, 31, 255);
             for (int y = 0; y < size; y++)
             for (int x = 0; x < size; x++)
             {
-                bool window = (x % 16 > 3 && x % 16 < 12) && (y % 22 > 4 && y % 22 < 15);
-                if (!window) { pixels[y * size + x] = new Color32(10, 16, 30, 255); continue; }
-                bool lit = rng.NextDouble() > 0.36;
-                pixels[y * size + x] = lit
-                    ? new Color32((byte)rng.Next(80, 255), (byte)rng.Next(120, 255), 255, 255)
-                    : new Color32(18, 30, 52, 255);
+                int wx = x % 64;
+                int wy = y % 88;
+                bool window = wx > 14 && wx < 50 && wy > 18 && wy < 62;
+                if (!window) { pixels[y * size + x] = glass; continue; }
+                double litRoll = rng.NextDouble();
+                if (litRoll > 0.62)
+                {
+                    float hue;
+                    float roll = (float)rng.NextDouble();
+                    if (roll < 0.58f) hue = 0.51f + (float)rng.NextDouble() * 0.11f;       // cool offices
+                    else if (roll < 0.86f) hue = 0.82f + (float)rng.NextDouble() * 0.11f;   // magenta residences
+                    else hue = 0.07f + (float)rng.NextDouble() * 0.07f;                     // warm interiors
+                    Color windowColor = Color.HSVToRGB(hue, 0.4f + (float)rng.NextDouble() * 0.4f,
+                        0.7f + (float)rng.NextDouble() * 0.3f);
+                    // A brighter top edge reads as a ceiling light when the facade is far away.
+                    if (wy < 24) windowColor = Color.Lerp(windowColor, Color.white, 0.32f);
+                    pixels[y * size + x] = windowColor;
+                }
+                else
+                {
+                    pixels[y * size + x] = new Color32(17, 29, 53, 255);
+                }
             }
             tex.SetPixels32(pixels);
             tex.Apply(false, true);

@@ -21,7 +21,6 @@ namespace NeonVelocity.Player
         public event Action JumpRequested;
         public event Action JumpReleased;
         public event Action SlideRequested;
-        public event Action PauseRequested;
 
         private float _sensitivity = 1f;
         private bool _gamepadLaneLatched;
@@ -45,7 +44,8 @@ namespace NeonVelocity.Player
         {
             var kb = Keyboard.current;
             if (kb == null) return;
-            if (kb.escapeKey.wasPressedThisFrame || kb.pKey.wasPressedThisFrame) PauseRequested?.Invoke();
+            // Escape/Pause are handled centrally by GameApp so the same press cannot pause and
+            // resume in one frame, and so Android/desktop contextual Back stays consistent.
             if (kb.aKey.wasPressedThisFrame || kb.leftArrowKey.wasPressedThisFrame) RequestLane(-1);
             if (kb.dKey.wasPressedThisFrame || kb.rightArrowKey.wasPressedThisFrame) RequestLane(1);
             bool jumpPress = kb.spaceKey.wasPressedThisFrame || kb.wKey.wasPressedThisFrame || kb.upArrowKey.wasPressedThisFrame;
@@ -88,7 +88,6 @@ namespace NeonVelocity.Player
                 JumpReleased?.Invoke();
             }
             if (gamepad.buttonEast.wasPressedThisFrame) SlideRequested?.Invoke();
-            if (gamepad.startButton.wasPressedThisFrame) PauseRequested?.Invoke();
         }
 
         private void ReadTouch()

@@ -2,7 +2,7 @@
 
 **RK VANTAGE GAMES** presents a three-lane, neon-noir endless runner built in **Unity 6000.6.7f1**, **Universal Render Pipeline**, **Input System** and **C#**, with an original authoritative multiplayer backend written in dependency-free **Python**.
 
-> **Verification notice (23 October 2026):** Unity 6000.6.7f1 Personal licensing is active. The project imports and compiles in Unity, **19/19 EditMode** and **2/2 PlayMode** tests pass, and a **universal (Intel + Apple silicon) macOS player** was built and launched successfully. The PlayMode tests cover real boot, main menu, a practice session, clean shutdown and a quick-tap jump regression. **50/50** headless core tests, **9/9** Python authority tests and **646** static checks also pass. Other platform builds, real-device input/audio, performance profiling and real-network multiplayer remain unverified. See [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
+> **Verification notice (24 October 2026):** Unity 6000.6.7f1 Personal licensing is active. The project imports and compiles in Unity, **24/24 EditMode** and **8/8 PlayMode** tests pass, and a **universal (Intel + Apple silicon) macOS player** was built, launched and visually exercised. The PlayMode tests cover real boot, main menu, a practice session, clean shutdown, quick-tap jump clearance, navigation/Back routing, settings-from-pause, Results return, garage cleanup and shop purchase confirmation. **50/50** headless core tests, **9/9** Python authority tests and **667** static checks also pass. Seven screens were captured at 1600×900, 1280×800 and an actual 3840×2160 backbuffer; a physical 4K display and 4K frame-rate profiling were not available. Other platform builds, real-device input/audio, performance profiling and real-network multiplayer remain unverified. See [QA Report](QA_REPORT.md), [Project Status](PROJECT_STATUS.md), [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
 
 ---
 
@@ -129,6 +129,8 @@ Documentation/
   KNOWN_LIMITATIONS.md           Honest gaps and operational constraints
   SERVER_PROTOCOL.md             nv1 TCP wire protocol and authority rules
   ASSET_LICENSING.md             Ownership and third-party licence notes
+QA_REPORT.md                     Defects, fixes, test evidence and remaining gaps
+PROJECT_STATUS.md                Current implementation/test/build state and next work
 ```
 
 ### Assembly layout
@@ -149,15 +151,16 @@ dotnet run --project Tools/CoreTests/CoreTests.csproj -c Release
 # Backend integration tests
 python3 -m unittest discover -s Backend/tests -v
 
-# Static project integrity (646 checks)
+# Static project integrity (667 checks)
 python3 Tools/validate_project.py
 ```
 
 Unity tests run through the Test Framework and pass in this environment:
 
 ```text
-EditMode: 19 / 19 passed
-PlayMode:  2 / 2 passed (boot + menu + practice smoke + quick-tap jump)
+EditMode: 24 / 24 passed
+PlayMode:  8 / 8 passed (boot, practice, jump, navigation/Back, settings-from-pause,
+           results root, garage cleanup and purchase confirmation)
 ```
 
 Build the verified macOS target:
@@ -171,7 +174,7 @@ UNITY="/Applications/Unity/Hub/Editor/6000.6.7f1/Unity.app/Contents/MacOS/Unity"
 open "Builds/macOS/NeonVelocity.app"
 ```
 
-The build tool configures a universal **x86_64 + ARM64** app, creates the pinned URP material templates and retains the post-processing shaders URP would otherwise strip. The verified output was **116.9 MiB**, ad-hoc signed, and launched successfully on this Intel Mac. A developer-only capture flag (`-nv-capture <directory>`) can save menu and practice screenshots from the built player for visual smoke checks.
+The build tool configures a universal **x86_64 + ARM64** app, creates the pinned URP material templates and retains the post-processing shaders URP would otherwise strip. The verified output was **117.0 MiB**, ad-hoc signed, and launched successfully on this Intel Mac. A developer-only capture flag (`-nv-capture <directory> -nv-capture-size 3840x2160`) saves menu, settings, shop/garage, mode-select, gameplay and pause screenshots from the built player; it produced actual 3840×2160 PNGs for UI inspection.
 
 **Build status:** macOS universal player built and launched; editor EditMode/PlayMode tests pass. Windows, Linux, WebGL, Android and iOS builds remain unverified, and no real-device, performance or multi-machine network validation has been performed. Android/iOS modules and SDKs are not available here.
 

@@ -356,7 +356,7 @@ namespace NeonVelocity.CoreTests
                 Eq(0f, data.settings.sfxVolume);
                 Eq(0.25f, data.settings.ambienceVolume);
                 Eq(2.5f, data.settings.swipeSensitivity);
-                Eq(3, data.settings.graphicsPreset);
+                Eq(4, data.settings.graphicsPreset);
                 Eq(60, data.settings.targetFrameRate);
                 Eq(7777, data.settings.serverPort);
                 Eq("127.0.0.1", data.settings.serverHost);

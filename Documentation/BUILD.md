@@ -91,10 +91,10 @@ CI hosts need a Unity licence (licensed runner or floating licence) and the matc
 ### macOS
 
 - Produces an `.app` bundle. The project does not configure notarisation, hardened runtime, entitlements or signing identity.
-- **BuildMacOS** sets `OSXStandalone.UserBuildSettings.architecture` to **x86_64 + ARM64**, producing a universal app. The verified build was 116.9 MiB and launched on an Intel Mac.
+- **BuildMacOS** sets `OSXStandalone.UserBuildSettings.architecture` to **x86_64 + ARM64**, producing a universal app. The verified build was 117.0 MiB and launched on an Intel Mac.
 - The tested app is ad-hoc signed only. For distribution, sign with a Developer ID and notarise separately.
 - Online needs outbound TCP access to port 7777 (or the configured port).
-- Optional visual smoke capture: launch the executable with `-nv-capture /absolute/output/directory` (together with `-screen-width 1600 -screen-height 900 -screen-fullscreen 0` if desired). The player saves `menu.png`, `gameplay-01.png` and `gameplay-02.png`, then exits. This developer flag does not affect normal launch.
+- Optional visual capture: launch the executable with `-nv-capture /absolute/output/directory -nv-capture-size 1600x900` (use `3840x2160` for a 4K pass). The player saves `menu.png`, `settings.png`, `shop-garage.png`, `modes.png`, `gameplay-01.png`, `gameplay-02.png` and `pause.png`, then exits. This developer flag does not affect normal launch.
 
 ### Windows / Linux
 
@@ -139,8 +139,8 @@ The server has no authentication beyond ephemeral session tokens and no TLS. Use
 A target is only "verified" after all of the following on real hardware:
 
 - [x] Unity editor imports the project with zero compile errors.
-- [x] EditMode tests pass (core + save): **19 / 19**.
-- [x] PlayMode tests pass (menu, practice run, shutdown, quick-tap jump): **2 / 2**.
+- [x] EditMode tests pass (core + save + display/settings): **24 / 24**.
+- [x] PlayMode tests pass (boot, practice, jump, navigation/Back, settings-from-pause, results, garage cleanup and purchase confirmation): **8 / 8**.
 - [ ] Offline modes start, pause, crash, finish and persist progression after restart.
 - [ ] The backend starts, and 2–5 humans can match, ready, count down, race and receive results.
 - [ ] A player can disconnect and reconnect within 45 s without losing their slot.

@@ -45,6 +45,16 @@ namespace NeonVelocity.Tests
             first.Data.unlockedCharacters.Add("nova");
             first.Data.selectedCharacter = "nova";
             first.Data.settings.musicVolume = 0.25f;
+            first.Data.settings.graphicsPreset = 4;
+            first.Data.settings.screenWidth = 3840;
+            first.Data.settings.screenHeight = 2160;
+            first.Data.settings.fullscreenMode = 1;
+            first.Data.settings.renderScale = 0.75f;
+            first.Data.settings.shadowQuality = 3;
+            first.Data.settings.reflectionQuality = 2;
+            first.Data.settings.antiAliasing = 8;
+            first.Data.settings.effectsQuality = 1;
+            first.Data.settings.viewDistance = 2;
             first.Save();
 
             Assert.That(File.Exists(first.SavePath), Is.True);
@@ -56,6 +66,16 @@ namespace NeonVelocity.Tests
             Assert.AreEqual("nova", second.Data.selectedCharacter);
             Assert.That(second.Data.unlockedCharacters, Does.Contain("nova"));
             Assert.AreEqual(0.25f, second.Data.settings.musicVolume, 0.0001f);
+            Assert.AreEqual(4, second.Data.settings.graphicsPreset);
+            Assert.AreEqual(3840, second.Data.settings.screenWidth);
+            Assert.AreEqual(2160, second.Data.settings.screenHeight);
+            Assert.AreEqual(1, second.Data.settings.fullscreenMode);
+            Assert.AreEqual(0.75f, second.Data.settings.renderScale, 0.0001f);
+            Assert.AreEqual(3, second.Data.settings.shadowQuality);
+            Assert.AreEqual(2, second.Data.settings.reflectionQuality);
+            Assert.AreEqual(8, second.Data.settings.antiAliasing);
+            Assert.AreEqual(1, second.Data.settings.effectsQuality);
+            Assert.AreEqual(2, second.Data.settings.viewDistance);
         }
 
         [Test]

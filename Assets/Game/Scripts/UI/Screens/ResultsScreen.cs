@@ -7,7 +7,7 @@ using UnityEngine.UI;
 namespace NeonVelocity.UI
 {
     /// <summary>End-of-run summary, including verification state and every reward granted.</summary>
-    public sealed class ResultsScreen : MonoBehaviour
+    public sealed class ResultsScreen : MonoBehaviour, IScreenBackHandler
     {
         private GameApp _app;
         private UIRoot _ui;
@@ -31,6 +31,11 @@ namespace NeonVelocity.UI
                 : _result.Online && _result.Placement == 1 ? UITheme.Amber
                 : _result.Online ? UITheme.Lime : UITheme.Cyan;
             ScreenKit.Backdrop(root, accent);
+
+            var back = UITheme.Button(root, "Back", "\u2039  MAIN MENU", UITheme.Muted,
+                () => _app.NavigateBack(), UITheme.SmallSize, false);
+            UITheme.Anchor((RectTransform)back.transform, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(32f, -82f), new Vector2(212f, -34f));
 
             var title = UITheme.Label(root, "Eyebrow",
                 _result.Online ? "AUTHORITATIVE CIRCUIT RESULT" : "SOLO RUN COMPLETE",
@@ -161,6 +166,12 @@ namespace NeonVelocity.UI
                 builder.Append("\u25B8  ").Append(_result.Messages[i]);
             }
             return builder.ToString();
+        }
+
+        public bool HandleBackRequest()
+        {
+            _app.NavigateBack();
+            return true;
         }
 
         private void BuildButtons(RectTransform root)

@@ -85,7 +85,9 @@ namespace NeonVelocity.Core
         {
             var rng = new DeterministicRandom(unchecked(_seed + index * 73856093 + _modeSalt * 19349663));
             int worldDistance = index * RowsPerSegment;
-            var biome = ((index / 4) + Math.Abs(_seed % 4)) % 4;
+            // The first eight segments establish the neon-city fantasy for every seed before
+            // the deterministic biome rotation starts. All peers still derive the same plan.
+            int biome = index < 8 ? 0 : ((index / 4) + Math.Abs(_seed % 4)) % 4;
             int difficulty = DifficultyForIndex(index);
             var rows = new TrackRow[RowsPerSegment];
             for (int i = 0; i < rows.Length; i++) rows[i] = new TrackRow(CellKind.Empty, CellKind.Empty, CellKind.Empty);

@@ -22,6 +22,7 @@ namespace NeonVelocity.Player
         private bool _shakeEnabled;
         private float _fovBase = 59f;
         private float _graphicsScale = 2f;
+        private int _effectsQuality = 2;
         private Color _neon = Palette.Cyan;
         private Bloom _bloom;
         private Vignette _vignette;
@@ -64,16 +65,17 @@ namespace NeonVelocity.Player
                 : (graphicsScale >= 1f ? AntialiasingMode.FastApproximateAntialiasing : AntialiasingMode.None);
             data.antialiasingQuality = AntialiasingQuality.High;
             data.renderShadows = graphicsScale >= 1f;
+            _effectsQuality = Mathf.Clamp(Mathf.RoundToInt(graphicsScale), 0, 2);
 
             var profile = ScriptableObject.CreateInstance<VolumeProfile>();
             profile.name = "NV Gameplay Post";
             var tonemapping = profile.Add<Tonemapping>(true);
             tonemapping.mode.Override(TonemappingMode.ACES);
             _bloom = profile.Add<Bloom>(true);
-            _bloom.intensity.Override(graphicsScale >= 1f ? 0.56f : 0.3f);
-            _bloom.threshold.Override(0.96f);
-            _bloom.scatter.Override(0.66f);
-            _bloom.highQualityFiltering.Override(graphicsScale >= 2f);
+            _bloom.intensity.Override(graphicsScale >= 1f ? 0.5f : 0.28f);
+            _bloom.threshold.Override(1.04f);
+            _bloom.scatter.Override(0.6f);
+            _bloom.highQualityFiltering.Override(graphicsScale >= 3f);
             _vignette = profile.Add<Vignette>(true);
             _vignette.intensity.Override(0.37f);
             _vignette.smoothness.Override(0.56f);
@@ -81,10 +83,10 @@ namespace NeonVelocity.Player
             _chroma = profile.Add<ChromaticAberration>(true);
             _chroma.intensity.Override(reducedMotion ? 0.025f : 0.085f);
             var grade = profile.Add<ColorAdjustments>(true);
-            grade.postExposure.Override(0.18f);
-            grade.contrast.Override(8f);
-            grade.saturation.Override(5f);
-            grade.colorFilter.Override(new Color(0.94f, 0.98f, 1f));
+            grade.postExposure.Override(0.14f);
+            grade.contrast.Override(12f);
+            grade.saturation.Override(6f);
+            grade.colorFilter.Override(new Color(0.93f, 0.97f, 1f));
             _filmGrain = profile.Add<FilmGrain>(true);
             _filmGrain.type.Override(FilmGrainLookup.Thin1);
             _filmGrain.intensity.Override(reducedMotion ? 0f : (graphicsScale >= 2f ? 0.16f : 0.08f));
@@ -100,6 +102,38 @@ namespace NeonVelocity.Player
             Volume.isGlobal = true;
             Volume.priority = 5f;
             Volume.profile = profile;
+        }
+
+        public void ApplyVideoSettings(SettingsData settings)
+        {
+            if (settings == null) return;
+            _graphicsScale = settings.graphicsPreset;
+            _effectsQuality = settings.effectsQuality;
+            var data = Camera.GetUniversalAdditionalCameraData();
+            data.antialiasing = settings.antiAliasing <= 0
+                ? AntialiasingMode.None
+                : (settings.antiAliasing <= 2
+                    ? AntialiasingMode.FastApproximateAntialiasing
+                    : AntialiasingMode.SubpixelMorphologicalAntiAliasing);
+            data.antialiasingQuality = settings.antiAliasing >= 8
+                ? AntialiasingQuality.High
+                : (settings.antiAliasing >= 4 ? AntialiasingQuality.Medium : AntialiasingQuality.Low);
+            data.renderShadows = settings.shadowQuality > 0;
+            Camera.farClipPlane = settings.viewDistance <= 0 ? 430f
+                : (settings.viewDistance >= 2 ? 700f : 550f);
+            if (_bloom != null)
+            {
+                _bloom.highQualityFiltering.Override(settings.effectsQuality >= 2);
+                _bloom.intensity.Override(settings.effectsQuality <= 0 ? 0.26f : 0.46f);
+            }
+            if (_filmGrain != null)
+                _filmGrain.intensity.Override(_reducedMotion ? 0f
+                    : (settings.effectsQuality >= 2 ? 0.16f : 0.07f));
+            if (_motionBlur != null)
+                _motionBlur.intensity.Override(_reducedMotion || settings.effectsQuality < 2 ? 0f : 0.14f);
+            if (_chroma != null)
+                _chroma.intensity.Override(_reducedMotion ? 0.025f
+                    : (settings.effectsQuality >= 2 ? 0.075f : 0.04f));
         }
 
         public void SetTarget(Transform target) => _target = target;
@@ -153,10 +187,15 @@ namespace NeonVelocity.Player
             float targetFov = _fovBase + speedNorm * 9f + (_runner.IsSliding ? 2f : 0f);
             if (_reducedMotion) targetFov = _fovBase + speedNorm * 3f;
             Camera.fieldOfView = Mathf.Lerp(Camera.fieldOfView, targetFov, 1f - Mathf.Exp(-dt * 3f));
-            if (_bloom != null) _bloom.intensity.Override(_reducedMotion ? 0.32f : (0.46f + speedNorm * 0.26f));
+            if (_bloom != null)
+            {
+                float baseBloom = _effectsQuality <= 0 ? 0.24f : (_effectsQuality >= 2 ? 0.42f : 0.34f);
+                float speedBloom = _effectsQuality >= 2 ? 0.2f : 0.08f;
+                _bloom.intensity.Override(_reducedMotion ? 0.28f : baseBloom + speedNorm * speedBloom);
+            }
             if (_vignette != null) _vignette.intensity.Override(_runner.IsDead ? 0.64f : 0.32f + speedNorm * 0.11f);
-            if (_motionBlur != null && !_reducedMotion && _graphicsScale >= 2f)
-                _motionBlur.intensity.Override(0.1f + speedNorm * 0.22f);
+            if (_motionBlur != null && !_reducedMotion && _effectsQuality >= 2)
+                _motionBlur.intensity.Override(0.08f + speedNorm * 0.18f);
         }
     }
 }

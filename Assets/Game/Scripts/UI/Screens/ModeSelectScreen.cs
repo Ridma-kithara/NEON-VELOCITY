@@ -27,7 +27,7 @@ namespace NeonVelocity.UI
             var root = (RectTransform)transform;
             ScreenKit.Backdrop(root, UITheme.Cyan);
             ScreenKit.Header(root, app, "SOLO", "RUN SELECT", "Eleven protocols. One grid. Choose your line.",
-                UITheme.Cyan, app.ShowMainMenu);
+                UITheme.Cyan, app.NavigateBack);
 
             UITheme.Scroll(root, "Mode Scroll", out RectTransform content);
             var scroll = root.Find("Mode Scroll");
@@ -64,17 +64,17 @@ namespace NeonVelocity.UI
             var title = UITheme.Label(card.transform, "Title", mode.Title, UITheme.HeadingSize, UITheme.White,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)title.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-                new Vector2(70f, -50f), new Vector2(-610f, -12f));
+                new Vector2(70f, -48f), new Vector2(-610f, -8f));
 
             var tag = UITheme.Label(card.transform, "Tag", mode.CodeName + "  /  " + mode.Tagline,
                 UITheme.SmallSize, Palette.Hex(mode.AccentHex), TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)tag.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(72f, 92f), new Vector2(-610f, 120f));
+                new Vector2(72f, 72f), new Vector2(-610f, 98f));
 
             var objective = UITheme.Label(card.transform, "Objective", mode.Objective, UITheme.SmallSize,
                 UITheme.Dim, TextAnchor.MiddleLeft);
             UITheme.Anchor((RectTransform)objective.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(72f, 56f), new Vector2(-610f, 92f));
+                new Vector2(72f, 44f), new Vector2(-610f, 72f));
 
             var best = _app.Profile.FindModeBest(mode.Id.ToString());
             string stat = best != null && best.distance > 0f
@@ -83,7 +83,7 @@ namespace NeonVelocity.UI
             var stats = UITheme.Label(card.transform, "Stats", stat, UITheme.SmallSize, UITheme.Muted,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)stats.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(72f, 22f), new Vector2(-610f, 50f));
+                new Vector2(72f, 14f), new Vector2(-610f, 42f));
 
             if (mode.IsTimed)
             {

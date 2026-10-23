@@ -1,5 +1,6 @@
 using System;
 using NeonVelocity.Core;
+using NeonVelocity.Player;
 using NeonVelocity.Utilities;
 using UnityEngine;
 using UnityEngine.UI;
@@ -12,6 +13,7 @@ namespace NeonVelocity.UI
         private GameApp _app;
         private UIRoot _ui;
         private int _tab;
+        private bool _purchaseInFlight;
 
         private static readonly string[] UpgradeIds = { "magnet", "shield", "multiplier", "boost", "head_start" };
         private static readonly string[] UpgradeNames = { "MAGNET CORE", "AEGIS PLATING", "SCORE ENGINE", "BOOST VECTOR", "HEAD START" };
@@ -40,7 +42,7 @@ namespace NeonVelocity.UI
             var root = (RectTransform)transform;
             ScreenKit.Backdrop(root, UITheme.Magenta);
             ScreenKit.Header(root, _app, "LOADOUT", "RUNNERS & GEAR", "Original cosmetics and permanent run upgrades.",
-                UITheme.Magenta, _app.ShowMainMenu);
+                UITheme.Magenta, _app.NavigateBack);
 
             BuildTabs(root);
 
@@ -69,22 +71,20 @@ namespace NeonVelocity.UI
                 int index = i;
                 var button = UITheme.Button(bar.transform, labels[i], labels[i],
                     i == _tab ? UITheme.Magenta : UITheme.Muted,
-                    () => { _app.Audio.PlayUiClick(); _app.ShowShop(index); },
+                    () => { _app.Audio.PlayUiClick(); _ui.ShowScreen(Build(_app, _ui, index)); },
                     UITheme.BodySize, i == _tab);
                 UITheme.Anchor((RectTransform)button.transform, new Vector2(i / 3f, 0f), new Vector2((i + 1) / 3f, 1f),
                     new Vector2(6f, 8f), new Vector2(-6f, -8f));
             }
 
-            var credits = UITheme.Label(root, "Credits", "", UITheme.BodySize, UITheme.Amber,
-                TextAnchor.MiddleRight, FontStyle.Bold);
-            UITheme.Anchor((RectTransform)credits.transform, new Vector2(1f, 1f), new Vector2(1f, 1f),
-                new Vector2(-420f, -216f), new Vector2(-36f, -172f));
-            ScreenKit.RefreshCurrency(credits, _app);
+            // Currency is already present in the persistent header. Repeating it on the tab bar
+            // made purchases harder to read and wasted the widest part of the row.
         }
 
         private void BuildCharacters(RectTransform content)
         {
             var profile = _app.Profile;
+            BuildGarage(content, profile);
             var characters = _app.Config.characters;
             for (int i = 0; i < characters.Count; i++)
             {
@@ -146,16 +146,101 @@ namespace NeonVelocity.UI
                 {
                     string id = character.id;
                     var unlock = UITheme.Button(card.transform, "Unlock", "UNLOCK", UITheme.Magenta,
-                        () => UnlockCharacter(id), UITheme.BodySize);
+                        () => RequestCharacter(id), UITheme.BodySize);
                     UITheme.Anchor((RectTransform)unlock.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
                         new Vector2(-350f, 26f), new Vector2(-24f, 82f));
                 }
             }
         }
 
-        private void UnlockCharacter(string id)
+        private void BuildGarage(RectTransform content, SaveData profile)
+        {
+            var character = _app.Config.Character(profile.selectedCharacter);
+            if (character == null) return;
+            var trail = _app.Config.Trail(profile.selectedTrail);
+
+            var card = ScreenKit.Card(content, "Garage Preview", new Color(0.025f, 0.05f, 0.095f, 0.96f));
+            UITheme.Layout(card.gameObject, 392f, -1f, 392f);
+
+            var frame = UITheme.Img(card.transform, "Preview Frame", new Color(0.006f, 0.014f, 0.03f, 1f),
+                UITheme.Rounded, false);
+            UITheme.Anchor((RectTransform)frame.transform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
+                new Vector2(22f, -174f), new Vector2(366f, 170f));
+
+            var rawGo = new GameObject("Garage Render", typeof(RectTransform));
+            rawGo.transform.SetParent(frame.transform, false);
+            var raw = rawGo.AddComponent<RawImage>();
+            raw.color = Color.white;
+            raw.raycastTarget = true;
+            UITheme.Stretch((RectTransform)raw.transform, 6f, 6f, 6f, 6f);
+            var garage = rawGo.AddComponent<GaragePreview>();
+            garage.Initialise(_app, character, trail, raw);
+
+            var hint = UITheme.Label(card.transform, "Garage Hint", "DRAG TO INSPECT",
+                UITheme.SmallSize, UITheme.Cyan, TextAnchor.MiddleLeft, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)hint.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(398f, -326f), new Vector2(-30f, -292f));
+
+            var eyebrow = UITheme.Label(card.transform, "Garage Eyebrow", "GARAGE  //  360\u00B0 TURNTABLE",
+                UITheme.SmallSize, UITheme.Cyan, TextAnchor.MiddleLeft, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)eyebrow.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(398f, -66f), new Vector2(-30f, -28f));
+
+            var name = UITheme.Label(card.transform, "Garage Name", character.displayName, 44,
+                UITheme.White, TextAnchor.MiddleLeft, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)name.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(398f, -128f), new Vector2(-30f, -70f));
+
+            var callsign = UITheme.Label(card.transform, "Garage Callsign",
+                character.callsign + "  \u00B7  " + character.perkLabel, UITheme.BodySize,
+                character.primary, TextAnchor.MiddleLeft, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)callsign.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(400f, -164f), new Vector2(-30f, -130f));
+
+            var bio = UITheme.Label(card.transform, "Garage Bio", character.bio, UITheme.SmallSize,
+                UITheme.Dim, TextAnchor.UpperLeft);
+            UITheme.Anchor((RectTransform)bio.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(400f, -242f), new Vector2(-30f, -172f));
+
+            var trailLabel = UITheme.Label(card.transform, "Garage Trail",
+                "TRAIL  " + (trail != null ? trail.displayName.ToUpperInvariant() : "STANDARD") +
+                "     //     STYLE  " + (character.armorStyle + 1).ToString("00"),
+                UITheme.SmallSize, UITheme.Amber, TextAnchor.MiddleLeft, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)trailLabel.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(400f, -270f), new Vector2(-30f, -242f));
+
+            var badge = UITheme.Badge(card.transform, "Garage Active", "ACTIVE LOADOUT", UITheme.Lime, 190, 30);
+            UITheme.Anchor((RectTransform)badge.transform, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-220f, -62f), new Vector2(-30f, -32f));
+
+            string[] poseLabels = { "IDLE", "RUN", "JUMP" };
+            RunnerPose[] poses = { RunnerPose.Idle, RunnerPose.Run, RunnerPose.Jump };
+            for (int i = 0; i < poses.Length; i++)
+            {
+                RunnerPose pose = poses[i];
+                var button = UITheme.Button(card.transform, "Pose " + poseLabels[i], poseLabels[i],
+                    i == 0 ? UITheme.Lime : UITheme.Muted, () => garage.SetPose(pose), UITheme.SmallSize, i == 0);
+                UITheme.Anchor((RectTransform)button.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
+                    new Vector2(-420f + i * 130f, 24f), new Vector2(-300f + i * 130f, 72f));
+            }
+        }
+
+        private void RequestCharacter(string id)
         {
             _app.Audio.PlayUiClick();
+            var character = _app.Config.Character(id);
+            if (character == null) return;
+            if (_app.Profile.unlockedCharacters.Contains(id)) return;
+            if (_app.Profile.level < character.unlockLevel)
+            {
+                _app.UI.Toast("REACH LEVEL " + character.unlockLevel, UITheme.Red, 2.5f);
+                return;
+            }
+            ConfirmPurchase(character.displayName, character.unlockCost, () => UnlockCharacter(id));
+        }
+
+        private void UnlockCharacter(string id)
+        {
             bool ok = _app.Progression.UnlockCharacter(id, out string message);
             _app.UI.Toast(message, ok ? UITheme.Lime : UITheme.Red, 2.5f);
             if (ok)
@@ -218,10 +303,21 @@ namespace NeonVelocity.UI
             _app.Audio.PlayUiClick();
             if (!_app.Profile.unlockedTrails.Contains(id))
             {
-                bool ok = _app.Progression.UnlockTrail(id, out string message);
-                _app.UI.Toast(message, ok ? UITheme.Lime : UITheme.Red, 2.5f);
-                if (!ok) { Reload(); return; }
+                var trail = _app.Config.Trail(id);
+                if (trail == null) return;
+                ConfirmPurchase(trail.displayName, trail.unlockCost, () => UnlockTrail(id));
+                return;
             }
+            _app.Progression.SelectTrail(id);
+            _app.SaveProfile();
+            Reload();
+        }
+
+        private void UnlockTrail(string id)
+        {
+            bool ok = _app.Progression.UnlockTrail(id, out string message);
+            _app.UI.Toast(message, ok ? UITheme.Lime : UITheme.Red, 2.5f);
+            if (!ok) { Reload(); return; }
             _app.Progression.SelectTrail(id);
             _app.SaveProfile();
             Reload();
@@ -269,19 +365,50 @@ namespace NeonVelocity.UI
                     new Vector2(100f, 12f), new Vector2(-360f, 40f));
 
                 var button = UITheme.Button(card.transform, "Buy", max ? "MAXED" : "\u25C6 " + UITheme.FormatNumber(cost),
-                    max ? UITheme.Muted : UITheme.Amber, () => BuyUpgrade(id), UITheme.BodySize);
+                    max ? UITheme.Muted : UITheme.Amber, () => RequestUpgrade(id), UITheme.BodySize);
                 button.interactable = !max;
                 UITheme.Anchor((RectTransform)button.transform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
                     new Vector2(-290f, -28f), new Vector2(-26f, 28f));
             }
         }
 
-        private void BuyUpgrade(string id)
+        private void RequestUpgrade(string id)
         {
             _app.Audio.PlayUiClick();
+            int level = _app.Profile.GetUpgradeLevel(id);
+            if (level >= ProgressionMath.MaxUpgradeLevel) return;
+            int cost = ProgressionMath.UpgradeCost(id, level + 1);
+            string label = "UPGRADE";
+            for (int i = 0; i < UpgradeIds.Length; i++)
+                if (UpgradeIds[i] == id) { label = UpgradeNames[i]; break; }
+            ConfirmPurchase(label, cost, () => BuyUpgrade(id));
+        }
+
+        private void BuyUpgrade(string id)
+        {
             bool ok = _app.Progression.BuyUpgrade(id, out string message);
             _app.UI.Toast(message, ok ? UITheme.Lime : UITheme.Red, 2.5f);
             Reload();
+        }
+
+        private void ConfirmPurchase(string itemName, int cost, Action onConfirm)
+        {
+            if (_purchaseInFlight || _app.UI.HasModal) return;
+            if (_app.Profile.credits < cost)
+            {
+                _app.UI.Toast("INSUFFICIENT CREDITS", UITheme.Red, 2.5f);
+                return;
+            }
+            string message = itemName + "\n\nCOST  \u25C6 " + UITheme.FormatNumber(cost) +
+                "     BALANCE  \u25C6 " + UITheme.FormatNumber(_app.Profile.credits) +
+                "\n\nThis purchase is permanent and cannot be refunded.";
+            _app.UI.ShowModal("CONFIRM PURCHASE", message, "PURCHASE", () =>
+            {
+                if (_purchaseInFlight) return;
+                _purchaseInFlight = true;
+                try { onConfirm?.Invoke(); }
+                finally { _purchaseInFlight = false; }
+            }, "CANCEL");
         }
 
         private void Reload()

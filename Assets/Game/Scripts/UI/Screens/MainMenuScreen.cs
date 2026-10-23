@@ -59,7 +59,7 @@ namespace NeonVelocity.UI
 
             var season = UITheme.Img(rail.transform, "Season", UITheme.PanelSoft, UITheme.Rounded, false);
             UITheme.Anchor((RectTransform)season.transform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(48f, -350f), new Vector2(302f, -304f));
+                new Vector2(48f, -350f), new Vector2(384f, -304f));
             var seasonText = UITheme.Label(season.transform, "Label", "SEASON 01  //  NEON MONSOON",
                 UITheme.SmallSize, UITheme.Lime, TextAnchor.MiddleCenter, FontStyle.Bold);
             UITheme.Stretch((RectTransform)seasonText.transform, 8f, 3f, 8f, 3f);

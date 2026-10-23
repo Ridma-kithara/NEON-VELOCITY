@@ -33,7 +33,7 @@ namespace NeonVelocity.UI
             ScreenKit.Backdrop(root, UITheme.Amber);
             ScreenKit.Header(root, _app, "OPERATIONS", "MISSION BOARD",
                 "Daily resets at 00:00 UTC. Weekly protocols roll over every Monday.", UITheme.Amber,
-                _app.ShowMainMenu);
+                _app.NavigateBack);
             BuildTabs(root);
 
             UITheme.Scroll(root, "Mission Scroll", out RectTransform content);

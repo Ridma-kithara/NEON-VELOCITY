@@ -13,7 +13,7 @@ namespace NeonVelocity.UI
     /// intent (quick match, room code, ready, start); every roster/start/result decision comes
     /// back from the server. Bots are added by the authority when the host starts with open slots.
     /// </summary>
-    public sealed class MultiplayerScreen : MonoBehaviour
+    public sealed class MultiplayerScreen : MonoBehaviour, IScreenBackHandler
     {
         private enum Pending
         {
@@ -87,7 +87,7 @@ namespace NeonVelocity.UI
             ScreenKit.Backdrop(root, UITheme.Lime);
             ScreenKit.Header(root, _app, "MULTIPLAYER", "NEON CIRCUIT",
                 "Five runners. One deterministic track. Server-authoritative results.",
-                UITheme.Lime, LeaveAndReturn);
+                UITheme.Lime, Back);
 
             BuildConnectionPanel(root);
             BuildLobbyPanel(root);
@@ -659,10 +659,22 @@ namespace NeonVelocity.UI
             _ui.Toast("ROOM CODE COPIED", UITheme.Cyan, 2f);
         }
 
-        private void LeaveAndReturn()
+        private void Back()
         {
+            if (_launched) return;
             _app.Audio.PlayUiClick();
-            _app.ShowMainMenu();
+            if (InRoom)
+            {
+                _ui.Toast("LEFT THE LOBBY", UITheme.Muted, 1.8f);
+                Client.ClearRoomState();
+            }
+            _app.NavigateBack();
+        }
+
+        public bool HandleBackRequest()
+        {
+            Back();
+            return true;
         }
 
         private void OnDestroy()

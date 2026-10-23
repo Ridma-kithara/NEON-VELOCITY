@@ -45,7 +45,7 @@ namespace NeonVelocity.UI
             ScreenKit.Backdrop(root, UITheme.Violet);
             ScreenKit.Header(root, _app, "RANKINGS", "GRID RANKINGS",
                 "Local records are always available. Circuit rankings are server-authoritative.",
-                UITheme.Violet, _app.ShowMainMenu);
+                UITheme.Violet, _app.NavigateBack);
             BuildTabs(root);
 
             if (_tab == 0)

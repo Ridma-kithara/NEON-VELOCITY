@@ -67,14 +67,18 @@ namespace NeonVelocity.World
             rimGo.transform.SetParent(transform, false);
             var rim = rimGo.AddComponent<Light>();
             rim.type = LightType.Directional;
-            rim.color = Palette.Magenta;
-            rim.intensity = 0.55f;
+            rim.color = new Color(0.5f, 0.65f, 1f);
+            rim.intensity = 0.6f;
             rim.transform.rotation = Quaternion.Euler(18f, 150f, 0f);
 
-            var fillCyan = CreatePointLight("Hero Cyan Fill", new Vector3(-3.8f, 3.1f, 2.2f), Palette.Cyan, 11f, 10f);
+            var fillCyan = CreatePointLight("Hero Cyan Fill", new Vector3(-3.8f, 3.1f, 2.2f), Palette.Cyan, 11f, 5.2f);
             fillCyan.transform.SetParent(transform, false);
-            var fillMagenta = CreatePointLight("Hero Magenta Fill", new Vector3(3.9f, 1.9f, 0.6f), Palette.Magenta, 9f, 7f);
-            fillMagenta.transform.SetParent(transform, false);
+            var fillBlue = CreatePointLight("Hero Blue Fill", new Vector3(3.9f, 1.9f, 0.6f),
+                new Color(0.35f, 0.55f, 1f), 9f, 2.6f);
+            fillBlue.transform.SetParent(transform, false);
+            var heroKey = CreatePointLight("Hero White Key", new Vector3(0.4f, 2.8f, 4.6f),
+                new Color(1f, 0.93f, 0.86f), 8f, 4.4f);
+            heroKey.transform.SetParent(transform, false);
 
             BuildSky();
             BuildPlatform();

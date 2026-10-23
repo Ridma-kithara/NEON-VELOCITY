@@ -39,6 +39,11 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
+# Unity recovery copies and local build-profile scaffolding
+*_BackUpThisFolder_ButDontShipItWithYourGame/
+Assets/Settings/Build Profiles/
+Assets/Settings/Build Profiles.meta
+
 # OS and editor noise
 .DS_Store
 .vscode/

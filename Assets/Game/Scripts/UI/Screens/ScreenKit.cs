@@ -65,25 +65,29 @@ namespace NeonVelocity.UI
 
             if (back != null)
             {
-                var backButton = UITheme.IconButton(band.transform, "Back", "\u2039", accent, () => back(), 58);
+                var backButton = UITheme.IconButton(band.transform, "Back", "\u2039", accent, () => back(), 42);
                 UITheme.Anchor((RectTransform)backButton.transform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
-                    new Vector2(30f, -29f), new Vector2(88f, 29f));
+                    new Vector2(28f, -28f), new Vector2(84f, 28f));
+                UITheme.AddOutline(backButton.targetGraphic, new Color(accent.r, accent.g, accent.b, 0.55f),
+                    new Vector2(1.5f, -1.5f));
             }
 
+            float contentLeft = back != null ? 112f : 34f;
+            float subtitleLeft = back != null ? 228f : 150f;
             var sectionLabel = UITheme.Label(band.transform, "Section", section, UITheme.SmallSize, accent,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)sectionLabel.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(36f, 70f), new Vector2(-320f, 96f));
+                new Vector2(contentLeft, 70f), new Vector2(-320f, 96f));
 
             var titleLabel = UITheme.Label(band.transform, "Title", title, UITheme.TitleSize, UITheme.White,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)titleLabel.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(34f, 20f), new Vector2(-320f, 72f));
+                new Vector2(contentLeft, 20f), new Vector2(-320f, 72f));
 
             var subtitleLabel = UITheme.Label(band.transform, "Subtitle", subtitle, UITheme.SmallSize, UITheme.Dim,
                 TextAnchor.MiddleLeft);
             UITheme.Anchor((RectTransform)subtitleLabel.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(150f, 74f), new Vector2(-320f, 96f));
+                new Vector2(subtitleLeft, 74f), new Vector2(-320f, 96f));
 
             CurrencyStrip(band.transform, app);
         }

@@ -55,50 +55,136 @@ namespace NeonVelocity.Player
             Clear();
             _visual = new GameObject("Visual").transform;
             _visual.SetParent(transform, false);
-            Color suitDark = Color.Lerp(character.secondary, Palette.Void, 0.62f);
+            Color suitDark = Color.Lerp(character.secondary, Palette.Void, 0.74f);
             Color accent = character.primary;
-            Material suit = MaterialLibrary.Lit(suitDark, 0.38f, 0.72f);
-            Material armor = MaterialLibrary.Lit(Color.Lerp(suitDark, Palette.PanelBright, 0.45f), 0.82f, 0.88f);
-            Material neon = MaterialLibrary.Lit(accent, 0.2f, 0.8f, accent, 3.1f);
+            Color pearl = Color.Lerp(character.secondary, Color.white, 0.58f);
+            Material suit = MaterialLibrary.Lit(suitDark, 0.48f, 0.78f);
+            Material armor = MaterialLibrary.Lit(pearl, 0.4f, 0.82f);
+            Material armorDark = MaterialLibrary.Lit(Color.Lerp(character.primary, Palette.Void, 0.48f), 0.58f, 0.8f);
+            Material chrome = MaterialLibrary.Lit(new Color(0.62f, 0.72f, 0.84f), 0.98f, 0.97f);
+            Material joint = MaterialLibrary.Lit(new Color(0.025f, 0.038f, 0.06f), 0.72f, 0.76f);
+            Material neon = MaterialLibrary.Lit(accent, 0.12f, 0.72f, accent, 4.2f);
             Material dark = MaterialLibrary.Lit(Palette.Void, 0.35f, 0.58f);
-            Material visor = MaterialLibrary.Lit(Color.Lerp(accent, Color.white, 0.35f), 0.95f, 0.98f, accent, 3.2f);
+            Material visor = MaterialLibrary.Lit(Color.Lerp(accent, Palette.Void, 0.68f), 0.92f, 0.99f,
+                Color.Lerp(accent, Color.white, 0.18f), 1.05f);
             Material trailMat = MaterialLibrary.Trail(trail != null ? trail.color : character.trail);
 
-            // Pelvis and torso.
+            // Layered pelvis: dark undersuit, bright hip armour, chrome belt and a narrow
+            // emissive seam. The extra silhouette break makes the legs readable at speed.
             _hips = Pivot("Hips", _visual, new Vector3(0f, 0.94f, 0f));
-            PrimitiveMeshes.Box(_hips, "Pelvis", new Vector3(0f, 0.06f, 0f), new Vector3(0.48f, 0.22f, 0.3f), suit);
-            PrimitiveMeshes.Box(_hips, "BeltGlow", new Vector3(0f, 0.15f, 0.16f), new Vector3(0.34f, 0.045f, 0.018f), neon);
-            _torso = Pivot("Torso", _hips, new Vector3(0f, 0.12f, 0f));
-            PrimitiveMeshes.Create("Chest", PrimitiveMeshes.Capsule, suit, _torso,
-                new Vector3(0f, 0.34f, 0f), new Vector3(0.48f, 0.34f, 0.3f));
-            PrimitiveMeshes.Box(_torso, "ChestPlate", new Vector3(0f, 0.42f, 0.15f), new Vector3(0.46f, 0.3f, 0.09f), armor);
-            PrimitiveMeshes.Box(_torso, "ChestCore", new Vector3(0f, 0.46f, 0.205f), new Vector3(0.1f, 0.1f, 0.015f), neon,
-                Quaternion.Euler(0, 0, 45));
-            PrimitiveMeshes.Box(_torso, "Backpack", new Vector3(0f, 0.4f, -0.21f), new Vector3(0.34f, 0.42f, 0.16f), armor);
-            PrimitiveMeshes.Box(_torso, "PackGlowL", new Vector3(-0.12f, 0.42f, -0.3f), new Vector3(0.035f, 0.3f, 0.02f), neon);
-            PrimitiveMeshes.Box(_torso, "PackGlowR", new Vector3(0.12f, 0.42f, -0.3f), new Vector3(0.035f, 0.3f, 0.02f), neon);
+            PrimitiveMeshes.Box(_hips, "PelvisCore", new Vector3(0f, 0.035f, 0f), new Vector3(0.32f, 0.2f, 0.25f), suit);
+            PrimitiveMeshes.Box(_hips, "PelvisPlate", new Vector3(0f, 0.045f, 0.115f), new Vector3(0.29f, 0.16f, 0.09f), armor);
+            PrimitiveMeshes.Box(_hips, "Belt", new Vector3(0f, 0.155f, 0f), new Vector3(0.43f, 0.052f, 0.27f), chrome);
+            PrimitiveMeshes.Box(_hips, "BeltGlow", new Vector3(0f, 0.158f, 0.142f), new Vector3(0.23f, 0.018f, 0.012f), neon);
+            PrimitiveMeshes.Box(_hips, "HipGuardL", new Vector3(-0.245f, 0.055f, 0f), new Vector3(0.11f, 0.24f, 0.29f),
+                armor, Quaternion.Euler(0f, 0f, 9f));
+            PrimitiveMeshes.Box(_hips, "HipGuardR", new Vector3(0.245f, 0.055f, 0f), new Vector3(0.11f, 0.24f, 0.29f),
+                armor, Quaternion.Euler(0f, 0f, -9f));
+            PrimitiveMeshes.SphereObject(_hips, "HipJointL", new Vector3(-0.17f, -0.02f, 0f), 0.15f, joint);
+            PrimitiveMeshes.SphereObject(_hips, "HipJointR", new Vector3(0.17f, -0.02f, 0f), 0.15f, joint);
+            PrimitiveMeshes.Box(_hips, "RearPelvis", new Vector3(0f, 0.06f, -0.15f), new Vector3(0.27f, 0.18f, 0.08f), armorDark);
 
-            // Head and helmet.
-            _head = Pivot("Head", _torso, new Vector3(0f, 0.72f, 0f));
-            PrimitiveMeshes.SphereObject(_head, "Helmet", new Vector3(0f, 0.14f, 0f), 0.34f, armor);
-            PrimitiveMeshes.Box(_head, "Visor", new Vector3(0f, 0.16f, 0.145f), new Vector3(0.27f, 0.11f, 0.06f), visor);
-            PrimitiveMeshes.Box(_head, "Jaw", new Vector3(0f, 0.02f, 0.1f), new Vector3(0.2f, 0.09f, 0.08f), suit);
-            PrimitiveMeshes.Box(_head, "HelmetFin", new Vector3(0f, 0.32f, -0.03f), new Vector3(0.035f, 0.16f, 0.2f), neon,
-                Quaternion.Euler(15, 0, 0));
+            // Chest reads as a white composite shell over a graphite flight frame.
+            _torso = Pivot("Torso", _hips, new Vector3(0f, 0.12f, 0f));
+            PrimitiveMeshes.Create("Abdomen", PrimitiveMeshes.Capsule, suit, _torso,
+                new Vector3(0f, 0.24f, 0f), new Vector3(0.32f, 0.25f, 0.27f));
+            PrimitiveMeshes.Box(_torso, "AbdominalSeam", new Vector3(0f, 0.25f, 0.14f), new Vector3(0.23f, 0.028f, 0.012f), neon);
+            PrimitiveMeshes.Create("ChestShell", PrimitiveMeshes.Capsule, suit, _torso,
+                new Vector3(0f, 0.43f, 0f), new Vector3(0.45f, 0.34f, 0.32f));
+            PrimitiveMeshes.Create("ChestPlate", PrimitiveMeshes.Capsule, armor, _torso,
+                new Vector3(0f, 0.47f, 0.055f), new Vector3(0.43f, 0.3f, 0.26f));
+            PrimitiveMeshes.Box(_torso, "ChestCenter", new Vector3(0f, 0.45f, 0.195f), new Vector3(0.31f, 0.18f, 0.07f), armor);
+            PrimitiveMeshes.Box(_torso, "ChestSplit", new Vector3(0f, 0.45f, 0.235f), new Vector3(0.015f, 0.18f, 0.012f), neon);
+            PrimitiveMeshes.Create("CoreRing", PrimitiveMeshes.Cylinder, neon, _torso,
+                new Vector3(0f, 0.47f, 0.235f), new Vector3(0.135f, 0.012f, 0.135f), Quaternion.Euler(90f, 0f, 0f));
+            PrimitiveMeshes.Create("Core", PrimitiveMeshes.Sphere, visor, _torso,
+                new Vector3(0f, 0.47f, 0.245f), new Vector3(0.075f, 0.075f, 0.04f));
+            PrimitiveMeshes.Box(_torso, "Collar", new Vector3(0f, 0.645f, 0f), new Vector3(0.27f, 0.07f, 0.22f), joint);
+            PrimitiveMeshes.Box(_torso, "CollarGlowL", new Vector3(-0.105f, 0.645f, 0.115f), new Vector3(0.075f, 0.018f, 0.015f), neon);
+            PrimitiveMeshes.Box(_torso, "CollarGlowR", new Vector3(0.105f, 0.645f, 0.115f), new Vector3(0.075f, 0.018f, 0.015f), neon);
+            PrimitiveMeshes.Box(_torso, "ShoulderHarnessL", new Vector3(-0.205f, 0.57f, 0.13f), new Vector3(0.032f, 0.18f, 0.035f),
+                armorDark, Quaternion.Euler(0f, 0f, -18f));
+            PrimitiveMeshes.Box(_torso, "ShoulderHarnessR", new Vector3(0.205f, 0.57f, 0.13f), new Vector3(0.032f, 0.18f, 0.035f),
+                armorDark, Quaternion.Euler(0f, 0f, 18f));
+            PrimitiveMeshes.Box(_torso, "Backpack", new Vector3(0f, 0.42f, -0.205f), new Vector3(0.32f, 0.37f, 0.16f), armorDark);
+            PrimitiveMeshes.Box(_torso, "Spine", new Vector3(0f, 0.42f, -0.295f), new Vector3(0.09f, 0.3f, 0.04f), chrome);
+            for (int i = 0; i < 3; i++)
+            {
+                PrimitiveMeshes.Box(_torso, "SpineGlow" + i, new Vector3(0f, 0.33f + i * 0.09f, -0.318f),
+                    new Vector3(0.055f, 0.018f, 0.012f), neon);
+            }
+            PrimitiveMeshes.Create("ThrusterL", PrimitiveMeshes.Cylinder, armor, _torso,
+                new Vector3(-0.12f, 0.29f, -0.275f), new Vector3(0.09f, 0.13f, 0.09f));
+            PrimitiveMeshes.Create("ThrusterR", PrimitiveMeshes.Cylinder, armor, _torso,
+                new Vector3(0.12f, 0.29f, -0.275f), new Vector3(0.09f, 0.13f, 0.09f));
+            PrimitiveMeshes.Create("ThrusterGlowL", PrimitiveMeshes.Cylinder, neon, _torso,
+                new Vector3(-0.12f, 0.155f, -0.275f), new Vector3(0.066f, 0.012f, 0.066f));
+            PrimitiveMeshes.Create("ThrusterGlowR", PrimitiveMeshes.Cylinder, neon, _torso,
+                new Vector3(0.12f, 0.155f, -0.275f), new Vector3(0.066f, 0.012f, 0.066f));
+
+            // Helmet: pearl shell, deep visor, chrome ear discs and a swept antenna fin.
+            _head = Pivot("Head", _torso, new Vector3(0f, 0.71f, 0f));
+            PrimitiveMeshes.Box(_head, "Neck", new Vector3(0f, -0.04f, 0f), new Vector3(0.12f, 0.13f, 0.12f), joint);
+            PrimitiveMeshes.Create("HelmetShell", PrimitiveMeshes.Sphere, armor, _head,
+                new Vector3(0f, 0.14f, 0f), new Vector3(0.36f, 0.33f, 0.35f));
+            PrimitiveMeshes.Create("HelmetCrown", PrimitiveMeshes.Sphere, armorDark, _head,
+                new Vector3(0f, 0.27f, -0.015f), new Vector3(0.3f, 0.13f, 0.3f));
+            PrimitiveMeshes.Create("Visor", PrimitiveMeshes.Sphere, visor, _head,
+                new Vector3(0f, 0.155f, 0.12f), new Vector3(0.29f, 0.135f, 0.16f));
+            PrimitiveMeshes.Box(_head, "VisorStrip", new Vector3(0f, 0.16f, 0.205f), new Vector3(0.22f, 0.017f, 0.015f), neon);
+            PrimitiveMeshes.Box(_head, "Brow", new Vector3(0f, 0.235f, 0.155f), new Vector3(0.28f, 0.045f, 0.06f), armor,
+                Quaternion.Euler(-8f, 0f, 0f));
+            PrimitiveMeshes.Box(_head, "Jaw", new Vector3(0f, 0.035f, 0.115f), new Vector3(0.2f, 0.085f, 0.14f), armorDark);
+            PrimitiveMeshes.Box(_head, "Chin", new Vector3(0f, 0.0f, 0.16f), new Vector3(0.13f, 0.045f, 0.08f), chrome);
+            PrimitiveMeshes.Create("EarL", PrimitiveMeshes.Cylinder, chrome, _head,
+                new Vector3(-0.183f, 0.15f, 0f), new Vector3(0.095f, 0.02f, 0.095f), Quaternion.Euler(0f, 0f, 90f));
+            PrimitiveMeshes.Create("EarR", PrimitiveMeshes.Cylinder, chrome, _head,
+                new Vector3(0.183f, 0.15f, 0f), new Vector3(0.095f, 0.02f, 0.095f), Quaternion.Euler(0f, 0f, 90f));
+            PrimitiveMeshes.Create("EarGlowL", PrimitiveMeshes.Cylinder, neon, _head,
+                new Vector3(-0.197f, 0.15f, 0f), new Vector3(0.045f, 0.012f, 0.045f), Quaternion.Euler(0f, 0f, 90f));
+            PrimitiveMeshes.Create("EarGlowR", PrimitiveMeshes.Cylinder, neon, _head,
+                new Vector3(0.197f, 0.15f, 0f), new Vector3(0.045f, 0.012f, 0.045f), Quaternion.Euler(0f, 0f, 90f));
+            PrimitiveMeshes.Box(_head, "HelmetFin", new Vector3(0f, 0.34f, -0.07f), new Vector3(0.028f, 0.13f, 0.2f), armorDark,
+                Quaternion.Euler(18f, 0f, 0f));
+            PrimitiveMeshes.Box(_head, "FinTip", new Vector3(0f, 0.4f, -0.125f), new Vector3(0.02f, 0.045f, 0.09f), neon,
+                Quaternion.Euler(18f, 0f, 0f));
 
             // Shoulders, arms, forearms.
-            _armL = BuildArm(_torso, new Vector3(-0.36f, 0.6f, 0f), suit, armor, neon, visor, -1f);
-            _armR = BuildArm(_torso, new Vector3(0.36f, 0.6f, 0f), suit, armor, neon, visor, 1f);
+            _armL = BuildArm(_torso, new Vector3(-0.35f, 0.58f, 0f), suit, armor, armorDark, joint, chrome, neon, visor, -1f);
+            _armR = BuildArm(_torso, new Vector3(0.35f, 0.58f, 0f), suit, armor, armorDark, joint, chrome, neon, visor, 1f);
             _forearmL = _armL.Find("Forearm");
             _forearmR = _armR.Find("Forearm");
 
             // Legs.
-            _legL = BuildLeg(_hips, new Vector3(-0.16f, 0f, 0f), suit, armor, neon, dark);
-            _legR = BuildLeg(_hips, new Vector3(0.16f, 0f, 0f), suit, armor, neon, dark);
+            _legL = BuildLeg(_hips, new Vector3(-0.17f, 0f, 0f), suit, armor, armorDark, joint, chrome, neon, dark);
+            _legR = BuildLeg(_hips, new Vector3(0.17f, 0f, 0f), suit, armor, armorDark, joint, chrome, neon, dark);
             _shinL = _legL.Find("Shin");
             _shinR = _legR.Find("Shin");
 
-            AddStyleDetails(character.armorStyle, _torso, _head, _hips, armor, neon, visor);
+            AddStyleDetails(character.armorStyle, _torso, _head, _hips, armor, armorDark, neon, visor);
+
+            if (!remote)
+            {
+                var rimGo = new GameObject("Runner Rim Light");
+                rimGo.transform.SetParent(_visual, false);
+                rimGo.transform.localPosition = new Vector3(0.7f, 1.45f, -1.05f);
+                var rim = rimGo.AddComponent<Light>();
+                rim.type = LightType.Point;
+                rim.color = Color.Lerp(Color.white, accent, 0.26f);
+                rim.range = 4.2f;
+                rim.intensity = 1.9f;
+                rim.shadows = LightShadows.None;
+
+                var fillGo = new GameObject("Runner Soft Fill");
+                fillGo.transform.SetParent(_visual, false);
+                fillGo.transform.localPosition = new Vector3(-0.9f, 1.9f, -0.55f);
+                var fill = fillGo.AddComponent<Light>();
+                fill.type = LightType.Point;
+                fill.color = new Color(0.72f, 0.86f, 1f);
+                fill.range = 4.2f;
+                fill.intensity = 0.9f;
+                fill.shadows = LightShadows.None;
+            }
 
             // Trail.
             var trailGo = new GameObject("EnergyTrail");
@@ -182,40 +268,71 @@ namespace NeonVelocity.Player
         }
 
         private static Transform BuildArm(Transform parent, Vector3 shoulder, Material suit, Material armor,
-            Material neon, Material visor, float side)
+            Material armorDark, Material joint, Material chrome, Material neon, Material visor, float side)
         {
             var pivot = Pivot(side < 0 ? "ArmL" : "ArmR", parent, shoulder);
-            PrimitiveMeshes.SphereObject(pivot, "ShoulderPad", Vector3.zero, 0.24f, armor);
-            PrimitiveMeshes.Box(pivot, "ShoulderBlade", new Vector3(side * 0.1f, 0.02f, 0f), new Vector3(0.14f, 0.08f, 0.22f), neon,
-                Quaternion.Euler(0f, 0f, side * 18f));
-            var forearm = Pivot("Forearm", pivot, new Vector3(0f, -0.34f, 0f));
-            PrimitiveMeshes.Create("UpperArm", PrimitiveMeshes.Capsule, suit, pivot, new Vector3(0f, -0.17f, 0f),
-                new Vector3(0.14f, 0.2f, 0.14f));
-            PrimitiveMeshes.Create("Forearm", PrimitiveMeshes.Capsule, armor, forearm, new Vector3(0f, -0.14f, 0f),
-                new Vector3(0.13f, 0.16f, 0.13f));
-            PrimitiveMeshes.Box(forearm, "WristGlow", new Vector3(0f, -0.27f, 0f), new Vector3(0.17f, 0.045f, 0.17f), neon);
-            PrimitiveMeshes.SphereObject(forearm, "Hand", new Vector3(0f, -0.34f, 0f), 0.12f, suit);
+            PrimitiveMeshes.SphereObject(pivot, "ShoulderJoint", Vector3.zero, 0.17f, joint);
+            PrimitiveMeshes.Create("ShoulderPad", PrimitiveMeshes.Sphere, armor, pivot,
+                new Vector3(side * 0.035f, 0.035f, 0f), new Vector3(0.26f, 0.2f, 0.28f));
+            PrimitiveMeshes.Box(pivot, "ShoulderBlade", new Vector3(side * 0.115f, 0.02f, 0.01f),
+                new Vector3(0.055f, 0.12f, 0.22f), neon, Quaternion.Euler(0f, 0f, side * 16f));
+            PrimitiveMeshes.Box(pivot, "ShoulderFrame", new Vector3(side * 0.02f, -0.03f, -0.11f),
+                new Vector3(0.2f, 0.13f, 0.055f), armorDark, Quaternion.Euler(0f, 0f, side * 10f));
+            PrimitiveMeshes.Create("UpperArm", PrimitiveMeshes.Capsule, suit, pivot,
+                new Vector3(0f, -0.19f, 0f), new Vector3(0.135f, 0.2f, 0.135f));
+            PrimitiveMeshes.Box(pivot, "BicepPlate", new Vector3(0f, -0.16f, 0.065f),
+                new Vector3(0.11f, 0.14f, 0.05f), armor);
+            var forearm = Pivot("Forearm", pivot, new Vector3(0f, -0.37f, 0f));
+            PrimitiveMeshes.SphereObject(forearm, "Elbow", Vector3.zero, 0.14f, joint);
+            PrimitiveMeshes.Create("Forearm", PrimitiveMeshes.Capsule, armor, forearm,
+                new Vector3(0f, -0.16f, 0f), new Vector3(0.145f, 0.17f, 0.145f));
+            PrimitiveMeshes.Box(forearm, "Gauntlet", new Vector3(0f, -0.17f, 0.075f),
+                new Vector3(0.115f, 0.2f, 0.055f), armorDark);
+            PrimitiveMeshes.Box(forearm, "WristGlow", new Vector3(0f, -0.295f, 0f),
+                new Vector3(0.14f, 0.022f, 0.14f), neon);
+            PrimitiveMeshes.SphereObject(forearm, "Hand", new Vector3(0f, -0.36f, 0.015f), 0.115f, joint);
+            PrimitiveMeshes.Box(forearm, "Knuckles", new Vector3(0f, -0.37f, 0.062f),
+                new Vector3(0.095f, 0.045f, 0.035f), chrome);
             return pivot;
         }
 
         private static Transform BuildLeg(Transform parent, Vector3 hip, Material suit, Material armor,
-            Material neon, Material dark)
+            Material armorDark, Material joint, Material chrome, Material neon, Material dark)
         {
             var pivot = Pivot("Leg", parent, hip);
+            PrimitiveMeshes.SphereObject(pivot, "HipJoint", Vector3.zero, 0.16f, joint);
+            PrimitiveMeshes.Create("Thigh", PrimitiveMeshes.Capsule, suit, pivot,
+                new Vector3(0f, -0.2f, 0f), new Vector3(0.17f, 0.23f, 0.17f));
+            PrimitiveMeshes.Box(pivot, "ThighPlate", new Vector3(0f, -0.18f, 0.075f),
+                new Vector3(0.17f, 0.24f, 0.075f), armor);
+            PrimitiveMeshes.Box(pivot, "ThighSeam", new Vector3(0f, -0.15f, 0.116f),
+                new Vector3(0.1f, 0.018f, 0.012f), neon);
             var shin = Pivot("Shin", pivot, new Vector3(0f, -0.4f, 0f));
-            PrimitiveMeshes.Create("Thigh", PrimitiveMeshes.Capsule, suit, pivot, new Vector3(0f, -0.2f, 0f),
-                new Vector3(0.17f, 0.24f, 0.17f));
-            PrimitiveMeshes.Box(pivot, "ThighPlate", new Vector3(0f, -0.18f, 0.08f), new Vector3(0.18f, 0.2f, 0.07f), armor);
-            PrimitiveMeshes.Create("Shin", PrimitiveMeshes.Capsule, armor, shin, new Vector3(0f, -0.18f, 0f),
-                new Vector3(0.14f, 0.2f, 0.14f));
-            PrimitiveMeshes.Box(shin, "ShinGlow", new Vector3(0f, -0.16f, 0.075f), new Vector3(0.06f, 0.22f, 0.02f), neon);
-            PrimitiveMeshes.Box(shin, "Boot", new Vector3(0f, -0.4f, 0.08f), new Vector3(0.22f, 0.12f, 0.38f), dark);
-            PrimitiveMeshes.Box(shin, "SoleGlow", new Vector3(0f, -0.46f, 0.1f), new Vector3(0.18f, 0.015f, 0.3f), neon);
+            PrimitiveMeshes.SphereObject(shin, "KneeJoint", Vector3.zero, 0.16f, joint);
+            PrimitiveMeshes.Create("KneeCap", PrimitiveMeshes.Cylinder, armor, shin,
+                new Vector3(0f, 0f, 0.055f), new Vector3(0.11f, 0.022f, 0.11f), Quaternion.Euler(90f, 0f, 0f));
+            PrimitiveMeshes.Create("KneeGlow", PrimitiveMeshes.Cylinder, neon, shin,
+                new Vector3(0f, 0f, 0.071f), new Vector3(0.055f, 0.012f, 0.055f), Quaternion.Euler(90f, 0f, 0f));
+            PrimitiveMeshes.Create("Shin", PrimitiveMeshes.Capsule, armor, shin,
+                new Vector3(0f, -0.18f, 0f), new Vector3(0.145f, 0.19f, 0.145f));
+            PrimitiveMeshes.Box(shin, "ShinGuard", new Vector3(0f, -0.16f, 0.07f),
+                new Vector3(0.115f, 0.23f, 0.055f), armorDark);
+            PrimitiveMeshes.Box(shin, "ShinGlow", new Vector3(0f, -0.17f, 0.102f),
+                new Vector3(0.045f, 0.16f, 0.012f), neon);
+            PrimitiveMeshes.SphereObject(shin, "Ankle", new Vector3(0f, -0.38f, 0f), 0.12f, joint);
+            PrimitiveMeshes.Box(shin, "Boot", new Vector3(0f, -0.44f, 0.065f),
+                new Vector3(0.215f, 0.13f, 0.35f), dark);
+            PrimitiveMeshes.Box(shin, "ToeCap", new Vector3(0f, -0.435f, 0.225f),
+                new Vector3(0.205f, 0.1f, 0.15f), armorDark);
+            PrimitiveMeshes.Box(shin, "Heel", new Vector3(0f, -0.45f, -0.085f),
+                new Vector3(0.16f, 0.1f, 0.1f), chrome);
+            PrimitiveMeshes.Box(shin, "SoleGlow", new Vector3(0f, -0.508f, 0.075f),
+                new Vector3(0.18f, 0.014f, 0.3f), neon);
             return pivot;
         }
 
         private void AddStyleDetails(int style, Transform torso, Transform head, Transform hips,
-            Material armor, Material neon, Material visor)
+            Material armor, Material armorDark, Material neon, Material visor)
         {
             if (style == 0)
             {

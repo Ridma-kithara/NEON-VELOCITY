@@ -15,6 +15,8 @@ namespace NeonVelocity.Utilities
     public sealed class VisualCaptureRunner : MonoBehaviour
     {
         private string _directory;
+        private int _captureWidth;
+        private int _captureHeight;
 
         private void Start()
         {
@@ -24,7 +26,10 @@ namespace NeonVelocity.Utilities
                 if (string.Equals(args[i], "-nv-capture", StringComparison.OrdinalIgnoreCase))
                 {
                     _directory = args[i + 1];
-                    break;
+                }
+                else if (string.Equals(args[i], "-nv-capture-size", StringComparison.OrdinalIgnoreCase))
+                {
+                    ParseSize(args[i + 1]);
                 }
             }
 
@@ -36,9 +41,37 @@ namespace NeonVelocity.Utilities
             StartCoroutine(CaptureRoutine());
         }
 
+        private void ParseSize(string value)
+        {
+            try
+            {
+                string[] parts = value.ToLowerInvariant().Split('x');
+                if (parts.Length != 2) return;
+                int width, height;
+                if (int.TryParse(parts[0], out width) && int.TryParse(parts[1], out height) &&
+                    width >= 640 && height >= 360)
+                {
+                    _captureWidth = width;
+                    _captureHeight = height;
+                }
+            }
+            catch (Exception)
+            {
+                // A malformed optional flag must never prevent a normal capture run.
+            }
+        }
+
         private IEnumerator CaptureRoutine()
         {
             yield return new WaitForSecondsRealtime(2.4f);
+            if (_captureWidth > 0 && _captureHeight > 0)
+            {
+                // Windows are requested explicitly so automation can exercise the 4K UI layout
+                // even when the host display is smaller. The screenshot's own dimensions are the
+                // authoritative result; the final report records any OS-level clamping.
+                Screen.SetResolution(_captureWidth, _captureHeight, FullScreenMode.Windowed);
+                yield return new WaitForSecondsRealtime(1.6f);
+            }
             yield return Capture("menu.png");
 
             var app = GameApp.Instance;
@@ -48,6 +81,24 @@ namespace NeonVelocity.Utilities
                 yield break;
             }
 
+            app.ShowSettings(false);
+            yield return new WaitForSecondsRealtime(0.8f);
+            yield return Capture("settings.png");
+
+            app.ShowMainMenu();
+            yield return new WaitForSecondsRealtime(0.6f);
+            app.ShowShop(0);
+            yield return new WaitForSecondsRealtime(1.2f);
+            yield return Capture("shop-garage.png");
+
+            app.ShowMainMenu();
+            yield return new WaitForSecondsRealtime(0.6f);
+            app.ShowModes();
+            yield return new WaitForSecondsRealtime(0.8f);
+            yield return Capture("modes.png");
+
+            app.ShowMainMenu();
+            yield return new WaitForSecondsRealtime(0.6f);
             app.StartMode(GameModeId.Practice);
             float deadline = Time.realtimeSinceStartup + 12f;
             while ((app.Session == null || app.Session.Runner == null || !app.Session.Runner.Running) &&
@@ -69,6 +120,17 @@ namespace NeonVelocity.Utilities
                 yield return null;
             }
             yield return Capture("gameplay-02.png");
+
+            if (app.Session != null && !app.Session.IsFinished)
+            {
+                app.ShowPause();
+                yield return new WaitForSecondsRealtime(0.7f);
+                yield return Capture("pause.png");
+            }
+
+            app.ShowMainMenu();
+            yield return new WaitForSecondsRealtime(0.5f);
+            Debug.Log("[VISUAL CAPTURE] Complete: " + _directory);
             Application.Quit();
         }
 

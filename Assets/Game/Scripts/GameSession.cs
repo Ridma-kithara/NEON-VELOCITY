@@ -191,6 +191,14 @@ namespace NeonVelocity
 
         private GameApp App => _app;
 
+        public void ApplyVideoSettings()
+        {
+            if (_app == null || _app.Profile == null) return;
+            var settings = _app.Profile.settings;
+            CameraRig?.ApplyVideoSettings(settings);
+            Environment?.ApplyVideoSettings(settings);
+        }
+
         private void Start()
         {
             // HUD is created after Begin by GameApp; pick it up on the first frame if present.
