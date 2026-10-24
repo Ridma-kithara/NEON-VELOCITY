@@ -521,24 +521,30 @@ namespace NeonVelocity.Utilities
                 (byte)Mathf.Clamp(Mathf.Lerp(accent.b, 1f, 0.55f) * 255f, 0f, 255f), 255);
             // Blocky ideogram-style glyphs read as signage at speed without using any real
             // language or copyrighted mark. Strokes vary per panel so districts do not repeat.
+            // A thin route header and abstract stroke clusters suggest a departure board
+            // without drawing boxed UI glyphs.
+            FillRect(pixels, w, h, 14, 22, 98, 2, paleInk);
+            FillRect(pixels, w, h, 14, 27, 52, 1, ink);
             int rows = variant % 3 == 0 ? 4 : 3;
             for (int row = 0; row < rows; row++)
             {
-                int y0 = 32 + row * 48;
+                int y0 = 38 + row * 45;
                 for (int glyph = 0; glyph < 3; glyph++)
                 {
                     int gx = 16 + glyph * 36;
                     Color32 color = ((row + glyph + variant) % 5 == 0) ? paleInk : ink;
-                    int style = rng.Next(0, 4);
-                    FillRect(pixels, w, h, gx, y0, 22, 3, color);
-                    FillRect(pixels, w, h, gx, y0 + 19, 22, 3, color);
-                    FillRect(pixels, w, h, gx, y0, 3, 22, color);
-                    FillRect(pixels, w, h, gx + 19, y0, 3, 22, color);
-                    if (style != 1) FillRect(pixels, w, h, gx + 6, y0 + 8, 10, 3, color);
-                    if (style != 2) FillRect(pixels, w, h, gx + 9, y0 + 4, 3, 14, color);
-                    if (style == 0) FillRect(pixels, w, h, gx + 4, y0 + 15, 14, 3, color);
+                    int style = rng.Next(0, 6);
+                    FillRect(pixels, w, h, gx, y0 + 3, 20, 2, color);
+                    if ((style & 1) == 0) FillRect(pixels, w, h, gx + 2, y0 + 3, 2, 16, color);
+                    if ((style & 2) == 0) FillRect(pixels, w, h, gx + 16, y0 + 5, 2, 14, color);
+                    FillRect(pixels, w, h, gx + 4, y0 + 11, 13, 2, color);
+                    if (style > 2) FillRect(pixels, w, h, gx + 6, y0 + 18, 9, 2, color);
+                    if (style == 5) FillRect(pixels, w, h, gx + 8, y0 + 5, 2, 13, color);
                 }
             }
+            // Route-map dots along the bottom edge.
+            for (int dot = 0; dot < 5; dot++)
+                FillRect(pixels, w, h, 15 + dot * 21, h - 18, 5, 5, dot == variant % 5 ? paleInk : ink);
 
             // Sparse scanlines create the faint banding of a real LED panel.
             for (int y = 0; y < h; y += 3)
@@ -683,40 +689,464 @@ namespace NeonVelocity.Utilities
             return m < 0 ? m + period : m;
         }
 
-        public static Texture2D WindowFacade(int seed)
+        /// <summary>
+        /// Deterministic facade atlas with four by four window cells. The world builder maps
+        /// these UVs from real dimensions instead of stretching one texture over every tower,
+        /// so a 12 m shopfront and a 36 m tower both keep believable floor and window sizes.
+        /// </summary>
+        public static Texture2D WindowFacade(int seed, int style = 0)
         {
             const int size = 512;
-            var rng = new System.Random(seed);
-            var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+            const int cells = 4;
+            const int cell = size / cells;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true)
             {
-                name = "NV_Facade", wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Bilinear
+                name = "NV_Facade_" + seed + "_" + style,
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 8
             };
             var pixels = new Color32[size * size];
-            Color32 glass = new Color32(9, 16, 31, 255);
+            bool masonry = style % 2 == 1;
+
             for (int y = 0; y < size; y++)
             for (int x = 0; x < size; x++)
             {
-                int wx = x % 64;
-                int wy = y % 88;
-                bool window = wx > 14 && wx < 50 && wy > 18 && wy < 62;
-                if (!window) { pixels[y * size + x] = glass; continue; }
-                double litRoll = rng.NextDouble();
-                if (litRoll > 0.62)
+                int cellX = x / cell;
+                int cellY = y / cell;
+                int lx = x - cellX * cell;
+                int ly = y - cellY * cell;
+                float cellHash = Hash01(cellX, cellY, seed + 19);
+                float detail = Hash01(x / 2, y / 3, seed + 41);
+                float dirt = Hash01(x / 5, y / 7, seed + 73);
+
+                // Matte wall base. It is kept close to neutral so the material tint can
+                // separate warm residential blocks from cool office towers.
+                float wall = masonry
+                    ? 0.20f + detail * 0.07f + dirt * 0.04f
+                    : 0.098f + detail * 0.045f + dirt * 0.026f;
+                bool panelSeam = lx < 2 || ly < 2 || lx > cell - 3 || ly > cell - 3;
+                if (panelSeam) wall *= 0.55f;
+                if (masonry && ly % 14 < 1) wall *= 0.72f;
+                if (!masonry && lx % 32 < 2) wall *= 0.82f;
+
+                Color32 wallColor = new Color32(
+                    (byte)(Mathf.Clamp01(wall * 0.82f) * 255f),
+                    (byte)(Mathf.Clamp01(wall * 0.95f) * 255f),
+                    (byte)(Mathf.Clamp01(wall) * 255f), 255);
+
+                int windowLeft = masonry ? 28 : 18;
+                int windowRight = masonry ? 100 : 110;
+                int windowBottom = masonry ? 26 : 18;
+                int windowTop = masonry ? 96 : 110;
+                bool inWindow = lx >= windowLeft && lx <= windowRight &&
+                                ly >= windowBottom && ly <= windowTop;
+                bool cellLit = cellHash > (masonry ? 0.50f : 0.63f);
+                float spillHue = Hash01(cellX + 5, cellY + 11, seed + 97);
+
+                if (inWindow)
                 {
-                    float hue;
-                    float roll = (float)rng.NextDouble();
-                    if (roll < 0.58f) hue = 0.51f + (float)rng.NextDouble() * 0.11f;       // cool offices
-                    else if (roll < 0.86f) hue = 0.82f + (float)rng.NextDouble() * 0.11f;   // magenta residences
-                    else hue = 0.07f + (float)rng.NextDouble() * 0.07f;                     // warm interiors
-                    Color windowColor = Color.HSVToRGB(hue, 0.4f + (float)rng.NextDouble() * 0.4f,
-                        0.7f + (float)rng.NextDouble() * 0.3f);
-                    // A brighter top edge reads as a ceiling light when the facade is far away.
-                    if (wy < 24) windowColor = Color.Lerp(windowColor, Color.white, 0.32f);
-                    pixels[y * size + x] = windowColor;
+                    int frame = masonry ? 5 : 4;
+                    bool windowFrame = lx < windowLeft + frame || lx > windowRight - frame ||
+                                       ly < windowBottom + frame || ly > windowTop - frame;
+                    if (windowFrame)
+                    {
+                        pixels[y * size + x] = new Color32(12, 18, 26, 255);
+                        continue;
+                    }
+
+                    bool mullion = lx >= 61 && lx <= 66;
+                    if (!masonry && (ly >= 60 && ly <= 64)) mullion = true;
+                    if (mullion)
+                    {
+                        pixels[y * size + x] = new Color32(9, 14, 22, 255);
+                        continue;
+                    }
+
+                    bool lit = cellHash > (masonry ? 0.50f : 0.63f);
+                    Color windowColor = new Color(0.018f, 0.035f, 0.065f);
+                    if (lit)
+                    {
+                        float hueRoll = Hash01(cellX + 5, cellY + 11, seed + 97);
+                        Color tint;
+                        if (hueRoll < 0.58f) tint = new Color(0.34f, 0.55f, 0.78f);
+                        else if (hueRoll < 0.85f) tint = new Color(0.72f, 0.30f, 0.55f);
+                        else tint = new Color(0.78f, 0.55f, 0.30f);
+                        tint = Color.Lerp(tint, Color.white, 0.12f);
+                        float brightness = Mathf.Lerp(0.32f, 0.95f,
+                            Hash01(cellX + 3, cellY + 23, seed + 131));
+                        windowColor = tint * brightness;
+                        float curtainRoll = Hash01(cellX + 9, cellY + 7, seed + 157);
+                        if (curtainRoll > 0.74f && ly > windowTop - 30)
+                            windowColor *= 0.38f;
+                        else if (curtainRoll < 0.18f && ly < windowBottom + 34)
+                            windowColor *= 0.55f;
+                        // Desks, partitions and blinds give the lit panes depth at close
+                        // range instead of leaving them as flat saturated rectangles.
+                        float deskRoll = Hash01(cellX + 17, cellY + 29, seed + 181);
+                        if (deskRoll > 0.42f)
+                        {
+                            int deskTop = windowBottom + 14 + (int)(deskRoll * 24f);
+                            if (ly < deskTop) windowColor *= 0.5f;
+                        }
+                        float blindRoll = Hash01(cellX + 31, cellY + 13, seed + 211);
+                        if (blindRoll > 0.58f && ly % 15 < 2) windowColor *= 0.55f;
+                    }
+                    float glassGradient = Mathf.Lerp(0.72f, 1.15f,
+                        (ly - windowBottom) / (float)Mathf.Max(1, windowTop - windowBottom));
+                    windowColor *= glassGradient;
+                    // Reflected neon streaks keep the glass from reading as flat paper.
+                    if ((x + cellY * 17) % 61 < 3) windowColor += new Color(0.08f, 0.02f, 0.12f);
+                    pixels[y * size + x] = new Color32(
+                        (byte)(Mathf.Clamp01(windowColor.r) * 255f),
+                        (byte)(Mathf.Clamp01(windowColor.g) * 255f),
+                        (byte)(Mathf.Clamp01(windowColor.b) * 255f), 255);
                 }
                 else
                 {
-                    pixels[y * size + x] = new Color32(17, 29, 53, 255);
+                    // Light spilling out of lit panes softens the hard window/wall edge and
+                    // makes the unlit facade read as a surface rather than a black cut-out.
+                    if (cellLit)
+                    {
+                        int dx = Mathf.Max(windowLeft - lx, lx - windowRight);
+                        int dy = Mathf.Max(windowBottom - ly, ly - windowTop);
+                        int distance = Mathf.Max(dx, dy);
+                        if (distance <= 12)
+                        {
+                            float falloff = 1f - distance / 12f;
+                            falloff *= falloff;
+                            Color spill = spillHue < 0.58f
+                                ? new Color(0.10f, 0.22f, 0.38f)
+                                : (spillHue < 0.85f
+                                    ? new Color(0.38f, 0.13f, 0.28f)
+                                    : new Color(0.38f, 0.26f, 0.13f));
+                            Color wallWash = wallColor;
+                            wallColor = To32(wallWash + spill * (falloff * 0.46f));
+                        }
+                    }
+                    // Sills, balcony bands and occasional service boxes interrupt the grid.
+                    if (masonry && ly >= windowBottom - 5 && ly <= windowBottom - 2)
+                        wallColor = new Color32(31, 36, 42, 255);
+                    if (!masonry && cellHash > 0.68f && lx > 96 && lx < 116 && ly > 28 && ly < 48)
+                        wallColor = new Color32(24, 31, 38, 255);
+                    if (masonry && cellHash > 0.58f && ly > 4 && ly < 17 &&
+                        lx > 22 && lx < 106 && (lx % 18 < 2 || ly < 7))
+                        wallColor = new Color32(45, 48, 52, 255);
+                    pixels[y * size + x] = wallColor;
+                }
+            }
+
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            return tex;
+        }
+
+        /// <summary>
+        /// Lit shop interior seen through a glazed frontage. Shelves, product blocks, a warm
+        /// ceiling wash and diagonal glass reflections stop the city storefronts from looking
+        /// like repeated UI posters.
+        /// </summary>
+        public static Texture2D ShopWindow(int seed, Color accent, int variant = 0)
+        {
+            const int w = 512, h = 256;
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, true)
+            {
+                name = "NV_Shop_" + seed,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 4
+            };
+            var rng = new System.Random(seed);
+            var pixels = new Color32[w * h];
+            Color warm = Color.Lerp(new Color(1f, 0.61f, 0.28f), accent, 0.18f);
+            Color pale = Color.Lerp(accent, Color.white, 0.58f);
+            Color dark = new Color(0.010f, 0.016f, 0.028f);
+
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                Color c = dark;
+                if (x > 10 && x < w - 10 && y > 12 && y < h - 16)
+                {
+                    float v = (y - 12f) / (h - 28f);
+                    c = Color.Lerp(new Color(0.018f, 0.026f, 0.043f),
+                        new Color(0.105f, 0.071f, 0.044f), Mathf.Pow(v, 1.75f));
+                    c += accent * (0.008f + 0.022f * v);
+                    if ((x % 86) < 2) c *= 0.58f;
+                }
+                pixels[y * w + x] = To32(c);
+            }
+
+            // Glazed frame, headers and a bright neon reveal.
+            FillRect(pixels, w, h, 0, 0, w, 10, new Color32(6, 9, 14, 255));
+            FillRect(pixels, w, h, 0, h - 12, w, 12, new Color32(7, 10, 16, 255));
+            FillRect(pixels, w, h, 14, 12, w - 28, 3, To32(pale));
+            FillRect(pixels, w, h, 14, h - 18, w - 28, 3, To32(accent * 0.8f));
+            FillRect(pixels, w, h, 10, 12, 2, h - 30, new Color32(9, 12, 18, 255));
+
+            // Warm ceiling strips near the top of the window, washing down over the
+            // shelving. Texture v=0 is the pavement edge on a cube face.
+            for (int light = 0; light < 4; light++)
+            {
+                int lx = 50 + light * 108;
+                int ly = h - 30;
+                FillRect(pixels, w, h, lx, ly, 70, 4, To32(warm * 1.6f));
+                for (int glow = 1; glow < 10; glow++)
+                    for (int gx = lx - 5; gx < lx + 75; gx++)
+                        BlendPixel(pixels, w, h, gx, ly - glow, warm, 0.07f / glow);
+            }
+
+            // Stocked shelves, with varying product colours.
+            Color[] productColours =
+            {
+                Color.Lerp(accent, Palette.White, 0.2f),
+                Palette.Amber,
+                Color.Lerp(Palette.Magenta, Palette.PanelBright, 0.55f),
+                Color.Lerp(Palette.Cyan, Palette.PanelBright, 0.35f),
+                Palette.White
+            };
+            for (int shelf = 0; shelf < 3; shelf++)
+            {
+                int sy = 71 + shelf * 49;
+                FillRect(pixels, w, h, 16, sy, w - 32, 4, new Color32(29, 24, 19, 255));
+                FillRect(pixels, w, h, 16, sy + 4, w - 32, 1, new Color32(75, 52, 31, 255));
+                int cursor = 22;
+                while (cursor < w - 40)
+                {
+                    int pw = rng.Next(14, 30);
+                    int ph = rng.Next(13, 32);
+                    if (cursor + pw > w - 26) break;
+                    Color product = productColours[rng.Next(0, productColours.Length)];
+                    product = Color.Lerp(product, new Color(0.22f, 0.16f, 0.11f), 0.34f) *
+                              (0.55f + (float)rng.NextDouble() * 0.32f);
+                    FillRect(pixels, w, h, cursor, sy + 5, pw, ph, To32(product));
+                    FillRect(pixels, w, h, cursor, sy + 5 + ph - 2, pw, 2,
+                        To32(Color.Lerp(product, Color.white, 0.55f)));
+                    cursor += pw + rng.Next(10, 26);
+                }
+            }
+
+            // Dark counter at pavement level, visible below the lowest shelf.
+            FillRect(pixels, w, h, 16, 18, w - 32, 35, new Color32(11, 13, 17, 255));
+            FillRect(pixels, w, h, 16, 49, w - 32, 3, To32(accent * 0.65f));
+
+            // Diagonal reflected highlights on the glass.
+            for (int streak = 0; streak < 6; streak++)
+            {
+                int offset = 20 + streak * 88;
+                for (int y = 14; y < h - 24; y += 2)
+                {
+                    int x = offset + (h - y) / 2;
+                    BlendPixel(pixels, w, h, x, y, new Color(0.55f, 0.72f, 0.9f), 0.055f);
+                    BlendPixel(pixels, w, h, x + 1, y, new Color(0.55f, 0.72f, 0.9f), 0.025f);
+                }
+            }
+
+            // Cool glass wash and fine horizontal banding from the glazing bars.
+            for (int y = 14; y < h - 18; y++)
+            for (int x = 12; x < w - 12; x++)
+            {
+                var c = pixels[y * w + x];
+                Color cooled = Color.Lerp(new Color(c.r / 255f, c.g / 255f, c.b / 255f),
+                    new Color(0.055f, 0.085f, 0.13f), 0.16f);
+                if ((y & 3) == 0) cooled *= 0.92f;
+                pixels[y * w + x] = To32(cooled);
+            }
+
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            return tex;
+        }
+
+        /// <summary>
+        /// Large vertical neon poster used for street media panels and blade signs. The
+        /// composition is deliberately graphical rather than a grid of boxed characters,
+        /// so it still reads as an advertisement at speed.
+        /// </summary>
+        public static Texture2D BillboardArt(int seed, Color accent, int variant = 0)
+        {
+            const int w = 256, h = 512;
+            var tex = new Texture2D(w, h, TextureFormat.RGBA32, true)
+            {
+                name = "NV_Ad_" + seed,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Trilinear,
+                anisoLevel = 8
+            };
+            var rng = new System.Random(seed);
+            var pixels = new Color32[w * h];
+            Color secondary = variant % 2 == 0 ? Palette.Magenta : Palette.Cyan;
+            Color pale = Color.Lerp(accent, Color.white, 0.55f);
+            Color dark = new Color(0.008f, 0.012f, 0.028f);
+
+            for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+            {
+                float v = y / (h - 1f);
+                Color c = Color.Lerp(new Color(0.012f, 0.018f, 0.04f), accent * 0.18f,
+                    Mathf.Pow(1f - v, 1.8f));
+                float band = Mathf.Pow(Mathf.Max(0f,
+                    Mathf.Sin((x / (float)w * 1.3f + v * 0.9f) * Mathf.PI * 2f)), 7f);
+                c += secondary * band * 0.028f;
+                c += new Color(0.006f, 0.008f, 0.014f) * (x / (float)w);
+                pixels[y * w + x] = To32(c);
+            }
+
+            // Frame and divider.
+            FillRect(pixels, w, h, 5, 5, 4, h - 10, To32(accent * 0.9f));
+            FillRect(pixels, w, h, 9, 5, w - 14, 3, To32(pale));
+            FillRect(pixels, w, h, 9, h - 9, w - 14, 4, To32(secondary * 0.8f));
+
+            // Primary graphic.
+            if (variant % 3 == 0)
+            {
+                float cy = h * 0.58f;
+                float cx = w * 0.55f;
+                float radius = 77f;
+                for (int y = (int)(cy - radius - 20f); y < cy + radius + 20f; y++)
+                for (int x = (int)(cx - radius - 20f); x < cx + radius + 20f; x++)
+                {
+                    float dist = Mathf.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+                    if (Mathf.Abs(dist - radius) < 4.5f) BlendPixel(pixels, w, h, x, y, pale, 0.9f);
+                    else if (dist < radius + 16f && dist > radius + 3f)
+                        BlendPixel(pixels, w, h, x, y, accent, 0.09f);
+                    if (dist < 18f) BlendPixel(pixels, w, h, x, y, secondary, 0.28f);
+                }
+                FillRect(pixels, w, h, 24, (int)(h * 0.27f), w - 48, 4, To32(accent * 0.7f));
+            }
+            else if (variant % 3 == 1)
+            {
+                for (int beam = 0; beam < 3; beam++)
+                {
+                    int offset = 66 + beam * 70;
+                    for (int y = 90; y < h - 60; y++)
+                    {
+                        int x = offset + (y - 90) / 3;
+                        BlendPixel(pixels, w, h, x, y, beam == 1 ? secondary : accent, 0.5f);
+                        BlendPixel(pixels, w, h, x + 4, y, accent, 0.12f);
+                    }
+                }
+                FillRect(pixels, w, h, 26, h - 140, 204, 3, To32(pale));
+            }
+            else
+            {
+                for (int bar = 0; bar < 5; bar++)
+                {
+                    int bx = 24 + bar * 42;
+                    int bh = 110 + rng.Next(0, 180);
+                    FillRect(pixels, w, h, bx, 110, 22, bh,
+                        To32(Color.Lerp(accent, secondary, bar * 0.18f) * 0.55f));
+                }
+                for (int ring = 0; ring < 3; ring++)
+                {
+                    int br = 24 + ring * 15;
+                    for (int y = (int)(h * 0.36f) - br; y < (int)(h * 0.36f) + br; y++)
+                    for (int x = (int)(w * 0.5f) - br; x < (int)(w * 0.5f) + br; x++)
+                    {
+                        float d = Mathf.Sqrt((x - w * 0.5f) * (x - w * 0.5f) +
+                                             (y - h * 0.36f) * (y - h * 0.36f));
+                        if (Mathf.Abs(d - br) < 3f) BlendPixel(pixels, w, h, x, y, pale, 0.7f);
+                    }
+                }
+            }
+
+            // Large abstract mark near the top.
+            FillRect(pixels, w, h, 24, h - 96, 6, 54, To32(pale));
+            FillRect(pixels, w, h, 91, h - 96, 6, 54, To32(pale));
+            for (int step = 0; step < 52; step++)
+                BlendPixel(pixels, w, h, 29 + step, h - 94 + step, secondary, 0.75f);
+            FillRect(pixels, w, h, 118, h - 74, 78, 3, To32(accent * 0.8f));
+            FillRect(pixels, w, h, 118, h - 62, 48, 2, To32(secondary * 0.8f));
+
+            // Small brand marks and scanlines.
+            for (int mark = 0; mark < 4; mark++)
+                FillRect(pixels, w, h, 24 + mark * 23, 28, 13, 3, To32(accent * (0.5f + mark * 0.1f)));
+            for (int y = 0; y < h; y += 3)
+            for (int x = 12; x < w - 12; x++)
+            {
+                var c = pixels[y * w + x];
+                pixels[y * w + x] = new Color32((byte)(c.r * 0.9f), (byte)(c.g * 0.9f),
+                    (byte)(c.b * 0.9f), 255);
+            }
+
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            return tex;
+        }
+
+        /// <summary>Soft-edged streak texture for the stretched rain billboards.</summary>
+        public static Texture2D RainStreak(int width = 16, int height = 96)
+        {
+            var tex = new Texture2D(width, height, TextureFormat.RGBA32, false)
+            {
+                name = "NV_RainStreak",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+            var pixels = new Color32[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                float ny = y / (height - 1f);
+                float ends = Mathf.SmoothStep(0f, 0.10f, ny) *
+                             (1f - Mathf.SmoothStep(0.82f, 1f, ny));
+                for (int x = 0; x < width; x++)
+                {
+                    float nx = x / (width - 1f) * 2f - 1f;
+                    float edge = Mathf.Pow(Mathf.Clamp01(1f - Mathf.Abs(nx)), 2.4f);
+                    float core = Mathf.Pow(Mathf.Clamp01(1f - Mathf.Abs(nx) * 1.7f), 8f);
+                    float alpha = Mathf.Clamp01(edge * ends * (0.75f + core * 0.25f));
+                    pixels[y * width + x] = new Color32(255, 255, 255, (byte)(alpha * 255f));
+                }
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(false, true);
+            return tex;
+        }
+
+        private static Color32 To32(Color c) => new Color32(
+            (byte)(Mathf.Clamp01(c.r) * 255f),
+            (byte)(Mathf.Clamp01(c.g) * 255f),
+            (byte)(Mathf.Clamp01(c.b) * 255f), 255);
+
+        private static void BlendPixel(Color32[] pixels, int w, int h, int x, int y, Color c, float alpha)
+        {
+            if (x < 0 || y < 0 || x >= w || y >= h) return;
+            alpha = Mathf.Clamp01(alpha);
+            int index = y * w + x;
+            Color dst = pixels[index];
+            pixels[index] = new Color32(
+                (byte)(Mathf.Clamp01(dst.r / 255f + c.r * alpha) * 255f),
+                (byte)(Mathf.Clamp01(dst.g / 255f + c.g * alpha) * 255f),
+                (byte)(Mathf.Clamp01(dst.b / 255f + c.b * alpha) * 255f),
+                255);
+        }
+
+        /// <summary>
+        /// Soft volumetric-looking lamp cone. Used as an additive quad below street lamps:
+        /// narrow at the fixture, wide and fading toward the road. No extra real lights.
+        /// </summary>
+        public static Texture2D LightShaft(int width = 64, int height = 256)
+        {
+            var tex = new Texture2D(width, height, TextureFormat.RGBA32, false)
+            {
+                name = "NV_LightShaft",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+            var pixels = new Color32[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                float ny = y / (float)(height - 1);
+                float halfWidth = Mathf.Lerp(0.48f, 0.055f, ny);
+                float vertical = Mathf.SmoothStep(0f, 0.13f, ny) * Mathf.Pow(ny, 0.58f);
+                for (int x = 0; x < width; x++)
+                {
+                    float nx = x / (float)(width - 1) * 2f - 1f;
+                    float edge = Mathf.Clamp01(1f - Mathf.Abs(nx) / halfWidth);
+                    edge *= edge;
+                    float wisps = 0.82f + 0.18f * Fbm(x / (float)width, ny * 0.45f, 9, 317);
+                    float a = Mathf.Clamp01(edge * vertical * wisps);
+                    pixels[y * width + x] = new Color32(255, 255, 255, (byte)(a * 255f));
                 }
             }
             tex.SetPixels32(pixels);

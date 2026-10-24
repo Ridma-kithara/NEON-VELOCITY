@@ -125,6 +125,9 @@ namespace NeonVelocity.Utilities
             // captured too. Hazards are cleared while fast-forwarding, so this remains a visual
             // smoke test rather than a claim that the run was played at normal speed.
             bool reachedTunnel = false;
+            bool capturedTransition = false;
+            int lastBiome = app.Session != null && app.Session.Track != null
+                ? app.Session.Track.CurrentBiome : -1;
             if (app.Session != null && app.Session.Track != null && !app.Session.IsFinished)
             {
                 Time.timeScale = 4f;
@@ -132,7 +135,26 @@ namespace NeonVelocity.Utilities
                 while (Time.realtimeSinceStartup < accelerateUntil)
                 {
                     KeepRunSafe(app);
-                    if (app.Session.Track.CurrentBiome % 4 == 3)
+                    int biome = app.Session.Track.CurrentBiome;
+                    if (!capturedTransition && biome != lastBiome)
+                    {
+                        // Hold the run briefly during a real biome crossfade so the lighting,
+                        // sky shell and rain fade can be inspected in the captured frame.
+                        capturedTransition = true;
+                        lastBiome = biome;
+                        Time.timeScale = 1f;
+                        float transitionStart = Time.realtimeSinceStartup;
+                        while (Time.realtimeSinceStartup - transitionStart < 0.65f)
+                        {
+                            KeepRunSafe(app);
+                            yield return null;
+                        }
+                        yield return Capture("gameplay-transition.png");
+                        Time.timeScale = 4f;
+                        continue;
+                    }
+                    lastBiome = biome;
+                    if (biome % 4 == 3)
                     {
                         reachedTunnel = true;
                         break;
@@ -166,7 +188,16 @@ namespace NeonVelocity.Utilities
         private IEnumerator Capture(string file)
         {
             string path = Path.Combine(_directory, file);
-            ScreenCapture.CaptureScreenshot(path);
+            // Capture through an explicit back-buffer readback. The asynchronous file path
+            // has shown intermittent duplicated-UI frames on macOS Metal, so use the
+            // synchronous texture path, then encode only after the readback has completed.
+            yield return new WaitForEndOfFrame();
+            Texture2D shot = ScreenCapture.CaptureScreenshotAsTexture();
+            if (shot != null)
+            {
+                File.WriteAllBytes(path, shot.EncodeToPNG());
+                Destroy(shot);
+            }
             Debug.Log($"[VISUAL CAPTURE] {path}");
             yield return new WaitForSecondsRealtime(0.8f);
         }

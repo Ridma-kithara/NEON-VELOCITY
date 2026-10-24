@@ -241,9 +241,9 @@ namespace NeonVelocity.World
             var magenta = Lit(Palette.Magenta, 0.1f, 0.8f, Palette.Magenta, 2.2f);
             var amber = Lit(Palette.Amber, 0.1f, 0.8f, Palette.Amber, 1.9f);
             var facade = MaterialLibrary.UnlitTextured("NV_MenuFacade",
-                TextureFactory.WindowFacade(424242), new Color(0.52f, 0.66f, 1f), new Vector2(2f, 5f));
+                TextureFactory.WindowFacade(424242), new Color(0.85f, 0.94f, 1f), new Vector2(2f, 3.6f));
             var facadeB = MaterialLibrary.UnlitTextured("NV_MenuFacadeB",
-                TextureFactory.WindowFacade(909090), new Color(1f, 0.5f, 0.8f), new Vector2(3f, 4f));
+                TextureFactory.WindowFacade(909090), new Color(1f, 0.78f, 0.9f), new Vector2(2.4f, 3.2f));
 
             for (int i = 0; i < 26; i++)
             {
@@ -270,11 +270,11 @@ namespace NeonVelocity.World
             }
 
             var signMaterial = MaterialLibrary.UnlitTextured("NV_MenuSignA",
-                TextureFactory.SignBoard(6161, Palette.Cyan, 1),
-                new Color(1.05f, 1.05f, 1.05f, 1f), Vector2.one);
+                TextureFactory.BillboardArt(6161, Palette.Cyan, 1),
+                new Color(1.3f, 1.3f, 1.3f, 1f), Vector2.one);
             var signMaterialB = MaterialLibrary.UnlitTextured("NV_MenuSignB",
-                TextureFactory.SignBoard(8181, Palette.Magenta, 2),
-                new Color(1.05f, 1.05f, 1.05f, 1f), Vector2.one);
+                TextureFactory.BillboardArt(8181, Palette.Magenta, 2),
+                new Color(1.3f, 1.3f, 1.3f, 1f), Vector2.one);
             for (int i = 0; i < 6; i++)
             {
                 float side = i % 2 == 0 ? -1f : 1f;

@@ -12,12 +12,20 @@ namespace NeonVelocity.Utilities
         private static Mesh _cylinder;
         private static Mesh _quad;
         private static Mesh _beveledBox;
+        private static Mesh _foliage;
 
         public static Mesh Cube => _cube != null ? _cube : (_cube = Capture(PrimitiveType.Cube));
         public static Mesh Sphere => _sphere != null ? _sphere : (_sphere = Capture(PrimitiveType.Sphere));
         public static Mesh Capsule => _capsule != null ? _capsule : (_capsule = Capture(PrimitiveType.Capsule));
         public static Mesh Cylinder => _cylinder != null ? _cylinder : (_cylinder = Capture(PrimitiveType.Cylinder));
         public static Mesh Quad => _quad != null ? _quad : (_quad = Capture(PrimitiveType.Quad));
+
+        /// <summary>
+        /// Faceted low-poly canopy used by the street trees. A full Unity sphere costs hundreds
+        /// of vertices per crown; this 48-triangle version keeps six trees per segment cheap
+        /// while retaining an irregular silhouette at runner speed.
+        /// </summary>
+        public static Mesh Foliage => _foliage != null ? _foliage : (_foliage = BuildLowPolySphere(8, 4));
 
         /// <summary>
         /// Unit cube with chamfered edges and corners. The 26 crisp facets catch rim light and
@@ -94,6 +102,79 @@ namespace NeonVelocity.Utilities
             mesh.SetTriangles(triangles, 0, false);
             mesh.RecalculateBounds();
             return mesh;
+        }
+
+        private static Mesh BuildLowPolySphere(int longitudeSegments, int latitudeSegments)
+        {
+            int lon = Mathf.Max(5, longitudeSegments);
+            int lat = Mathf.Max(2, latitudeSegments);
+            var vertices = new List<Vector3>(2 + (lat - 1) * (lon + 1));
+            var normals = new List<Vector3>(vertices.Capacity);
+            var uvs = new List<Vector2>(vertices.Capacity);
+            var triangles = new List<int>(lon * lat * 6);
+
+            vertices.Add(Vector3.up);
+            normals.Add(Vector3.up);
+            uvs.Add(new Vector2(0.5f, 1f));
+            for (int ring = 1; ring < lat; ring++)
+            {
+                float phi = Mathf.PI * ring / lat;
+                float y = Mathf.Cos(phi);
+                float radius = Mathf.Sin(phi);
+                for (int segment = 0; segment <= lon; segment++)
+                {
+                    float theta = Mathf.PI * 2f * segment / lon;
+                    var direction = new Vector3(Mathf.Cos(theta) * radius, y, Mathf.Sin(theta) * radius);
+                    vertices.Add(direction);
+                    normals.Add(direction.normalized);
+                    uvs.Add(new Vector2(segment / (float)lon, 1f - ring / (float)lat));
+                }
+            }
+            int bottom = vertices.Count;
+            vertices.Add(Vector3.down);
+            normals.Add(Vector3.down);
+            uvs.Add(new Vector2(0.5f, 0f));
+
+            int firstRing = 1;
+            for (int segment = 0; segment < lon; segment++)
+                AddOutwardTriangle(vertices, triangles, 0, firstRing + segment, firstRing + segment + 1);
+
+            for (int ring = 0; ring < lat - 2; ring++)
+            {
+                int rowA = firstRing + ring * (lon + 1);
+                int rowB = rowA + lon + 1;
+                for (int segment = 0; segment < lon; segment++)
+                {
+                    int a = rowA + segment;
+                    int b = rowA + segment + 1;
+                    int c = rowB + segment;
+                    int d = rowB + segment + 1;
+                    AddOutwardTriangle(vertices, triangles, a, c, b);
+                    AddOutwardTriangle(vertices, triangles, b, c, d);
+                }
+            }
+
+            int lastRing = firstRing + (lat - 2) * (lon + 1);
+            for (int segment = 0; segment < lon; segment++)
+                AddOutwardTriangle(vertices, triangles, bottom, lastRing + segment + 1, lastRing + segment);
+
+            var mesh = new Mesh { name = "NV_Foliage" };
+            mesh.SetVertices(vertices);
+            mesh.SetNormals(normals);
+            mesh.SetUVs(0, uvs);
+            mesh.SetTriangles(triangles, 0, false);
+            mesh.RecalculateBounds();
+            return mesh;
+        }
+
+        private static void AddOutwardTriangle(List<Vector3> vertices, List<int> triangles,
+            int a, int b, int c)
+        {
+            Vector3 normal = (vertices[a] + vertices[b] + vertices[c]).normalized;
+            bool flip = Vector3.Dot(Vector3.Cross(vertices[b] - vertices[a], vertices[c] - vertices[a]), normal) < 0f;
+            triangles.Add(a);
+            triangles.Add(flip ? c : b);
+            triangles.Add(flip ? b : c);
         }
 
         private static Vector3 Axis(int index) => index switch

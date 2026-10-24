@@ -85,7 +85,7 @@ namespace NeonVelocity.Player
             _chroma = profile.Add<ChromaticAberration>(true);
             _chroma.intensity.Override(reducedMotion ? 0.025f : 0.085f);
             var grade = profile.Add<ColorAdjustments>(true);
-            grade.postExposure.Override(0.14f);
+            grade.postExposure.Override(0.20f);
             grade.contrast.Override(12f);
             grade.saturation.Override(6f);
             grade.colorFilter.Override(new Color(0.93f, 0.97f, 1f));
@@ -214,7 +214,7 @@ namespace NeonVelocity.Player
                 float speedBloom = _effectsQuality >= 2 ? 0.2f : 0.08f;
                 _bloom.intensity.Override(_reducedMotion ? 0.28f : baseBloom + speedNorm * speedBloom);
             }
-            if (_vignette != null) _vignette.intensity.Override(_runner.IsDead ? 0.64f : 0.32f + speedNorm * 0.11f);
+            if (_vignette != null) _vignette.intensity.Override(_runner.IsDead ? 0.64f : 0.29f + speedNorm * 0.10f);
             if (_motionBlur != null && !_reducedMotion && _effectsQuality >= 2)
                 _motionBlur.intensity.Override(0.08f + speedNorm * 0.18f);
         }

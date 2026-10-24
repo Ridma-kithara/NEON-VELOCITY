@@ -146,7 +146,8 @@ def validate_sources() -> None:
 def validate_docs() -> None:
     for name in ("README.md", "Documentation/SETUP.md", "Documentation/BUILD.md",
                  "Documentation/TEST_REPORT.md", "Documentation/KNOWN_LIMITATIONS.md",
-                 "Documentation/SERVER_PROTOCOL.md", "Documentation/ASSET_LICENSING.md"):
+                 "Documentation/SERVER_PROTOCOL.md", "Documentation/ASSET_LICENSING.md",
+                 "Documentation/DEVELOPMENT_PROGRESS.md"):
         check((ROOT / name).exists(), f"required document missing: {name}")
     print("[docs] required documentation present")
 

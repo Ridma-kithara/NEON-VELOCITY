@@ -140,7 +140,7 @@ A target is only "verified" after all of the following on real hardware:
 
 - [x] Unity editor imports the project with zero compile errors.
 - [x] EditMode tests pass (core + save + display/settings): **24 / 24**.
-- [x] PlayMode tests pass (boot, practice, jump, navigation/Back, settings-from-pause, results, garage cleanup and purchase confirmation): **8 / 8**.
+- [x] PlayMode tests pass (boot, practice, jump, navigation/Back, settings-from-pause, results, restart, garage cleanup and purchase confirmation): **9 / 9**.
 - [ ] Offline modes start, pause, crash, finish and persist progression after restart.
 - [ ] The backend starts, and 2–5 humans can match, ready, count down, race and receive results.
 - [ ] A player can disconnect and reconnect within 45 s without losing their slot.

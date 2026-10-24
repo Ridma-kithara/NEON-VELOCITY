@@ -140,6 +140,35 @@ namespace NeonVelocity.Utilities
             return mat;
         }
 
+        /// <summary>Additive particle material that samples a soft alpha texture. Used for
+        /// rain so the streaks have feathered edges instead of hard untextured quads.</summary>
+        public static Material AdditiveTextured(string key, Texture texture, Color color)
+        {
+            string cacheKey = "addtex:" + key;
+            if (Cache.TryGetValue(cacheKey, out Material existing) && existing != null) return existing;
+            var mat = FromTemplate("NV_Particles_Additive", ParticleShader);
+            mat.name = key;
+            mat.mainTexture = texture;
+            SafeSetColor(mat, "_BaseColor", Palette.Hdr(color, 1.65f));
+            SafeSetColor(mat, "_Color", Palette.Hdr(color, 1.65f));
+            if (mat.HasProperty("_BaseMap"))
+            {
+                mat.SetTexture("_BaseMap", texture);
+                mat.SetTextureScale("_BaseMap", Vector2.one);
+            }
+            SafeSetFloat(mat, "_Surface", 1f);
+            SafeSetFloat(mat, "_Blend", 2f);
+            SafeSetFloat(mat, "_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            SafeSetFloat(mat, "_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            SafeSetFloat(mat, "_ZWrite", 0f);
+            SafeSetFloat(mat, "_Cull", (float)UnityEngine.Rendering.CullMode.Off);
+            mat.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+            Cache[cacheKey] = mat;
+            return mat;
+        }
+
         public static Material Additive(Color color)
         {
             string key = $"add:{ColorUtility.ToHtmlStringRGBA(color)}";

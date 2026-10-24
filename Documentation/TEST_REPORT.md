@@ -13,15 +13,15 @@ This report separates checks that were actually executed from work that remains 
 | Check | Result | Status |
 |---|---|---|
 | Headless gameplay-core tests (`Tools/CoreTests`) | **50 / 50 passed** | Executed |
-| Python authority integration tests (`Backend/tests`) | **9 / 9 passed** in 10.4 s | Executed |
-| Static project integrity (`Tools/validate_project.py`) | **709 / 709 checks passed** | Executed |
+| Python authority integration tests (`Backend/tests`) | **9 / 9 passed** in 10.386 s | Executed |
+| Static project integrity (`Tools/validate_project.py`) | **710 / 710 checks passed** | Executed |
 | Unity 6000.6.7f1 project import and script compilation | **0 errors** in the final build/capture path | Executed |
 | Unity EditMode tests | **24 / 24 passed** | Executed |
-| Unity PlayMode tests | **8 / 8 passed** | Executed |
+| Unity PlayMode tests | **9 / 9 passed** | Executed |
 | macOS universal player build | **Succeeded** (117.0 MiB, x86_64 + ARM64) | Executed |
 | macOS player launch | **Launched**, booted menu and completed capture run without runtime exceptions | Executed |
-| In-app UI/gameplay visual capture | **8 screens captured and inspected** at 1600×900 and 1280×800, including a real subway/station frame | Executed |
-| 4K render/capture | **Actual 3840×2160 PNGs** for all 8 screens; UI/gameplay inspected | Executed |
+| In-app UI/gameplay visual capture | **9 screens captured and inspected** at 1600×900 and 1280×800, including an active biome crossfade and a real subway/station frame | Executed |
+| 4K render/capture | **Actual 3840×2160 PNGs** for all 9 screens; UI/gameplay inspected | Executed |
 | WebGL player build | Not built | Unverified |
 | Windows/Linux player builds | Not built | Unverified |
 | Android APK/AAB | Not built | Unverified |
@@ -32,7 +32,7 @@ This report separates checks that were actually executed from work that remains 
 | Real-network two/five-client race | Not performed | Unverified |
 | Performance/memory profiling, signing/notarisation | Not performed | Unverified |
 
-**Conclusion:** the core logic, authority, Unity runtime bootstrap, expanded EditMode/PlayMode coverage, contextual navigation, settings presets/persistence, garage preview lifecycle, purchase-confirmation guard, generated visuals and a universal macOS player are verified for the routes listed in [QA_REPORT.md](../QA_REPORT.md). Actual 3840×2160 screenshots were produced and inspected, but no physical 4K display or 4K performance profile was available. Other platforms, broader gameplay coverage, real devices/networks and release packaging remain outstanding.
+**Conclusion:** the core logic, authority, Unity runtime bootstrap, expanded EditMode/PlayMode coverage, contextual navigation, settings presets/persistence, garage preview lifecycle, purchase-confirmation guard, generated environment and a universal macOS player are verified for the routes listed in [QA_REPORT.md](../QA_REPORT.md). The environment pass was exercised through clean 1600×900, 1280×800 and actual 3840×2160 captures, including the active biome crossfade and textured rain. No physical 4K display or 4K performance profile was available. Other platforms, broader gameplay coverage, real devices/networks and release packaging remain outstanding.
 
 ## 2. Headless core tests
 
@@ -111,16 +111,17 @@ One stale headless-core assertion was found and corrected during this pass: it e
 
 ## 6. Unity PlayMode tests
 
-**Result: 8 / 8 passed.**
+**Result: 9 / 9 passed.**
 
 `BootSmokeTests.AppBootsMainMenuAndStartsPractice` executes the real runtime bootstrap and checks the menu, save, profile, title stage, Practice run, HUD and clean shutdown. `QuickTapJumpClearsLowBarrierHeight` drives a real short jump through the input/runtime path and verifies a low-barrier clearance.
 
-`NavigationTests` adds six end-to-end UI tests:
+`NavigationTests` adds seven end-to-end UI tests:
 
 - Back from Shop returns to Modes and Back from Modes returns to Main Menu without stale history;
 - Back dismisses a quit confirmation before leaving the title screen, then title Back opens the confirmation;
 - Settings opened from Pause returns to Pause, then Back resumes the run;
 - Results Back returns to Main Menu with no stale history;
+- Restart rebuilds the Practice session, preserves the mode, starts at the start line and leaves the new run unpaused;
 - the garage preview camera/texture/stage are destroyed when Shop closes;
 - a locked-runner purchase opens confirmation without unlocking or charging, and repeated clicks do not stack a second dialog.
 
@@ -165,9 +166,11 @@ The app is ad-hoc signed (`Signature=adhoc`) and has no Developer ID or notarisa
 
 ### Visual capture pass
 
-The built player was run with the developer-only `-nv-capture <directory> [-nv-capture-size WxH]` switch. The harness captured eight screens through `ScreenCapture`: main menu, settings, shop/garage, mode select, two live Practice frames, a subway/station frame and pause. The subway frame is reached by temporarily accelerating game time with `Time.timeScale = 4` and clearing nearby hazards; it is a visual smoke test of the seeded biome, not a normal-speed manual playthrough.
+The built player was run with the developer-only `-nv-capture <directory> [-nv-capture-size WxH]` switch. The harness captured nine screens through a synchronous `ScreenCapture.CaptureScreenshotAsTexture()` readback: main menu, settings, shop/garage, mode select, two live Practice frames, a mid-biome transition, a subway/station frame and pause. The transition frame is held 0.65 s into a real 2.6 s crossfade. The subway frame is reached by temporarily accelerating game time with `Time.timeScale = 4` and clearing nearby hazards; it is a visual smoke test of the seeded biome, not a normal-speed manual playthrough.
 
-The pass was repeated at **1600×900**, **1280×800 (16:10)** and **3840×2160**. `sips` confirmed the PNG dimensions; the 4K files are genuinely 3840×2160. The menu, runner card, garage turntable, mode cards, beveled runner, wet road, sidewalks, tiered facades, storefront detail, subway ceiling/walls/platform edge/columns/signage, rain, HUD and pause overlay were inspected at each size. The final builds also logged no missing audio resources or stripped-shader errors while the new footstep/lane/thunder/train clips were loaded. This is an automated visual/UI smoke check, not a full manual playthrough or listening test; physical 4K-display behaviour, 4K frame rate and audio balance remain unverified.
+The pass was repeated at **1600×900**, **1280×800 (16:10)** and **3840×2160**. `sips` confirmed the PNG dimensions; the 4K files are genuinely 3840×2160. The menu, runner card, garage turntable, mode cards, beveled runner, rain-slicked road, raised sidewalks, curb/gutter detail, recessed stone podiums, tiered storefronts with shelving/counters, awnings and mullions, street trees with visible trunks, lamp pools, billboard/blade signage, layered skyline, subway ceiling/walls/platform edge/columns/signage, textured rain, HUD and pause overlay were inspected at each size. The transition frame showed normal tunnel geometry with blended purple/blue lighting and no scene-wide dark overlay. The final player log contained no runtime exceptions or warnings, and the build log contained only Unity licensing and Intel-editor deprecation notices.
+
+One automated run produced a tiled/duplicated-UI readback frame; the synchronous harness was already in use, and immediate clean reruns produced normal frames. The final 1280/1600/4K sets used for this report were visually inspected. The cause was not isolated, so this remains a QA capture-readback limitation; live physical-display behaviour has not been independently captured. This is an automated visual/UI smoke check, not a full manual playthrough or listening test; physical 4K-display behaviour, 4K frame rate and audio balance remain unverified.
 
 ## 8. Static project integrity
 
@@ -186,10 +189,10 @@ python3 Tools/validate_project.py
 [audio] 27 mono PCM clips, 72.8s total
 [sources] 48 runtime/editor scripts, 4 Unity test scripts
 [docs] required documentation present
-PASS: 709 checks
+PASS: 710 checks
 ```
 
-The validator checks meta/GUID integrity, build-scene configuration, empty boot scene, branding, orientation, Input System, colour space, Android settings, audio format, source markers and required documentation.
+The validator checks meta/GUID integrity, build-scene configuration, empty boot scene, branding, orientation, Input System, colour space, Android settings, audio format, source markers and required documentation, including the development-progress record.
 
 ## 9. Not yet verified
 
@@ -199,6 +202,8 @@ The validator checks meta/GUID integrity, build-scene configuration, empty boot 
 | Audible audio mix and spatial balance | Clips load without missing-resource errors; trigger path not audibly validated and no loudness measurement was performed |
 | Every power-up, pickup, upgrade, collision and result path | Not individually exercised at runtime |
 | Physical 4K display, HDR and 4K frame rate | 3840×2160 backbuffer capture succeeded, but only a 1600×900 host display was available |
+| Live confirmation that the intermittent macOS screenshot-readback artifact cannot appear on a physical display | One tiled/duplicated-UI readback frame occurred; clean reruns and final captures passed, but live compositor capture was unavailable |
+| LOD, occlusion and dynamic foliage wind | Not implemented in this environment slice; merged static geometry was chosen for draw-call control |
 | Final confirmed shop purchase/debit on a disposable profile | Modal/no-charge/no-stacking guard is tested; confirmed debit is guarded in code but not exercised end-to-end |
 | Two- and five-client races with real Unity clients | Backend loopback tests only; no multi-client Unity run |
 | Reconnect/disconnect on real clients | Server logic tested; client UI path not exercised |
@@ -219,7 +224,7 @@ The validator checks meta/GUID integrity, build-scene configuration, empty boot 
 # 2. 9 authority integration tests
 python3 -m unittest discover -s Backend/tests -v
 
-# 3. 709 static checks
+# 3. 710 static checks
 python3 Tools/validate_project.py
 
 # 4. Unity EditMode tests

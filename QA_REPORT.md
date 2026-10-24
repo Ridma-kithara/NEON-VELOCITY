@@ -15,15 +15,15 @@ This report records the defects found during the audit, the fixes applied, the c
 |---|---|---|
 | Unity script compilation | 0 errors in runtime, editor-tools and test assemblies | Executed |
 | Unity EditMode tests | **24 / 24 passed** | Executed |
-| Unity PlayMode tests | **8 / 8 passed** | Executed |
+| Unity PlayMode tests | **9 / 9 passed** | Executed |
 | Headless gameplay-core tests | **50 / 50 passed** | Executed |
-| Python multiplayer authority tests | **9 / 9 passed** (10.4 s) | Executed |
-| Static project integrity | **709 / 709 checks passed** | Executed |
+| Python multiplayer authority tests | **9 / 9 passed** (10.386 s) | Executed |
+| Static project integrity | **710 / 710 checks passed** | Executed |
 | macOS universal player build | **Succeeded**, 117.0 MiB, x86_64 + ARM64 | Executed |
 | Built player launch / capture run | Completed without runtime exceptions | Executed |
-| UI captures at 1600 × 900 | menu, settings, shop/garage, mode select, gameplay ×2, subway/station, pause inspected | Executed |
-| UI captures at 1280 × 800 (16:10) | Same eight screens inspected | Executed |
-| 4K render/capture at 3840 × 2160 | Same eight screens, including the subway; PNGs confirmed 3840 × 2160 | Executed |
+| UI captures at 1600 × 900 | menu, settings, shop/garage, mode select, gameplay ×2, active biome transition, subway/station and pause inspected | Executed |
+| UI captures at 1280 × 800 (16:10) | Same nine screens inspected | Executed |
+| 4K render/capture at 3840 × 2160 | Same nine screens, including the transition and subway; PNGs confirmed 3840 × 2160 | Executed |
 | Physical 4K display output | Not available | Unverified |
 | Windows / Linux / Android / iOS builds | Platform modules not available/verified | Unverified |
 | Real-device touch, controller, audio, suspend/resume | No test devices | Unverified |
@@ -59,7 +59,7 @@ The 4K result is an actual 3840 × 2160 backbuffer/screenshot produced by the bu
 
 **Fix:** Central `AppScreen` history stack, one `HandleBack()` entry point for Escape/gamepad/UI, `IScreenBackHandler` for stateful screens, `NavigateBack()` fallback rules, modal-first dismissal, and title/Results root resets. The header Back control is now a visible icon button with consistent placement. Escape on the title screen opens the existing quit confirmation instead of silently rebuilding the menu.
 
-**Test:** PlayMode navigation suite (six navigation/context tests, including the modal/quit-title case). Also verified captured Back controls at 1280 × 800, 1600 × 900 and 3840 × 2160.
+**Test:** PlayMode navigation suite (seven navigation/context tests, including the modal/quit-title and restart cases). Also verified captured Back controls at 1280 × 800, 1600 × 900 and 3840 × 2160.
 
 **Result:** Passed for tested routes.
 
@@ -201,9 +201,9 @@ The 4K result is an actual 3840 × 2160 backbuffer/screenshot produced by the bu
 
 **Files:** `Assets/Game/Scripts/Utilities/VisualCaptureRunner.cs`
 
-**Fix:** Extended the capture harness to eight screens and added `-nv-capture-size`, explicitly requesting windowed resolution and capturing actual backbuffer screenshots. Ran 1600 × 900, 1280 × 800 and 3840 × 2160.
+**Fix:** Extended the capture harness to nine screens (including a mid-biome transition) and added `-nv-capture-size`, explicitly requesting windowed resolution and capturing actual backbuffer screenshots. Ran 1600 × 900, 1280 × 800 and 3840 × 2160.
 
-**Test:** Verified PNG dimensions with `sips`; inspected menu, settings, shop, modes, gameplay and pause at all three sizes.
+**Test:** Verified PNG dimensions with `sips`; inspected menu, settings, shop, modes, gameplay, transition, tunnel and pause at all three sizes.
 
 **Result:** Passed. 4K PNGs are genuinely 3840 × 2160 and the UI remains anchored and readable.
 
@@ -241,6 +241,38 @@ The 4K result is an actual 3840 × 2160 backbuffer/screenshot produced by the bu
 
 ---
 
+### QA-14 — High — Gameplay environment lacked depth and had visible lighting/rain defects
+
+**Root cause:** The procedural city was still dominated by flat wall bands, thin storefront cut-outs and sparse street detail. Earlier rain attempts either used untextured additive streaks that read as laser lines or particles whose texture was too faint. Several warm light cards were placed below the raised sidewalk/forecourt surface, so they were occluded. Transparent glow/haze cards were merged into the shadow-casting decor renderer, producing solid dark rectangles on the road. Tree trunks were thin and dark enough to disappear, leaving canopies looking unsupported.
+
+**Files:** `Assets/Game/Scripts/World/TrackManager.cs`, `EnvironmentController.cs`, `MenuStage.cs`, `Assets/Game/Scripts/Utilities/TextureFactory.cs`, `MaterialLibrary.cs`, `PrimitiveMeshes.cs`, `Assets/Game/Scripts/Player/RunnerCamera.cs`, `Assets/Game/Scripts/Utilities/VisualCaptureRunner.cs`
+
+**Fix:** Rebuilt the city frontage with recessed storefronts, layered facades, podiums, awnings, shutters, shelving/counters/ceiling lights, service pipes, AC units, balconies, rooftop plant and a layered skyline. Added raised sidewalks, gutters, drains, benches, bins, signs, lamps, warm practical light pools and street trees with visible self-lit trunks. Reworked the generated shop/facade/billboard textures, raised the light pools above the pavement, moved additive glow cards into a separate merged renderer with shadows disabled, and rebuilt rain with a generated streak texture, stretch billboards, wind slant, splashes and mist. Added a 2.6-second fog/ambient/sun/rim/fill/camera/rain/sky crossfade.
+
+**Test:** Rebuilt the macOS player and captured nine screens at 1600 × 900, 1280 × 800 and 3840 × 2160. `sips` confirmed the 4K dimensions. Inspected the menu, garage, game HUD, wet road, storefronts, sidewalk, trees, billboards, lamp pools, textured rain, tunnel and an active mid-transition frame. Final player log contained no runtime exceptions or warnings. Static checks, EditMode, PlayMode, core and backend suites were rerun.
+
+**Result:** Passed for the inspected captures. The transition frame showed normal tunnel geometry with the incoming purple/blue lighting blend and no scene-wide dark veil. The earlier additive glow-card shadow rectangles were no longer present in the clean late-biome 4K frame.
+
+**Limitation:** All art remains procedural/original; there are no authored meshes, textures, PBR libraries, rigs or animation clips. Trees are static merged geometry, with no dynamic foliage wind. No LOD/occlusion pass or 4K frame-time profile was added. The pavement light pools and rain remain intentionally subtle at night.
+
+---
+
+### QA-15 — Medium — Intermittent duplicated-UI/tiled screenshot readback on macOS Metal
+
+**Root cause:** Not isolated. One automated capture run produced a frame with tiled UI/frame content while normal reruns of the same build produced clean gameplay, transition and tunnel images. The harness already used synchronous `ScreenCapture.CaptureScreenshotAsTexture()` and `EncodeToPNG()`. No matching exception, shader error or UI-duplication symptom appeared in the player log or PlayMode tests.
+
+**Files:** `Assets/Game/Scripts/Utilities/VisualCaptureRunner.cs` (capture tooling only)
+
+**Fix/mitigation:** Retained the synchronous capture path, reran the full capture set, and inspected the final 1280 × 800, 1600 × 900 and 3840 × 2160 images used for this report. Documented the artifact rather than presenting it as fixed.
+
+**Test:** Multiple automated capture runs; clean final sets inspected at all three sizes. No live physical-display capture was available to confirm compositor behaviour.
+
+**Result:** Mitigated for the QA evidence set; root cause unresolved. This is recorded as a QA capture-readback limitation, not a confirmed gameplay rendering bug.
+
+**Limitation:** Live/OS-composited capture and physical 4K display verification remain outstanding. If the artifact ever appears outside the capture harness it must be escalated and re-tested as a product defect.
+
+---
+
 ## 3. Additional implementation work completed during the pass
 
 These are product/quality improvements rather than regressions:
@@ -260,6 +292,7 @@ These are product/quality improvements rather than regressions:
 - Wet asphalt reflection cards, storefront mullions/doorways/light pools, tiered facades and a subway-station pass with platforms, columns, benches, route maps and suspended signage; path: `TrackManager.cs`.
 - Landing weight through a short camera dip and FOV punch, gated by reduced motion; paths: `RunnerCamera.cs`, `RunnerController.cs`.
 - Authoritative biome reporting so environment and audio match the seeded track plan; path: `TrackManager.cs`.
+- Recessed storefront city with layered facade families, podiums, street trees/furniture, skyline depth, warm practical pools, textured rain, a no-shadow additive-card renderer and a 2.6-second biome crossfade; paths: `TrackManager.cs`, `EnvironmentController.cs`, `TextureFactory.cs`, `MaterialLibrary.cs`, `PrimitiveMeshes.cs`, `MenuStage.cs`.
 
 ## 4. Remaining limitations and unverified work
 
@@ -276,6 +309,8 @@ These are not reported as fixed:
 9. **Signing/release:** the macOS app is ad-hoc signed and not notarised. No store packaging, privacy metadata or release pipeline exists.
 10. **Save safety:** purchase tests avoid writing the real profile; a full disposable-profile purchase/restore test remains to be added.
 11. **Audio quality:** all 27 synthesized clips load in the player and the new spatial one-shots produced no missing-resource errors, but no listening test, loudness measurement or device-output validation was performed.
+12. **Screenshot capture:** one automated macOS Metal run produced a tiled/duplicated-UI readback frame. Clean reruns and the final 1280/1600/4K sets were inspected, but the cause was not isolated. Live physical-display capture and 4K frame-rate profiling remain unverified.
+13. **Environment depth:** dynamic tree/foliage wind, explicit LOD/occlusion and profiler-driven performance tuning were not implemented. Rain/light pools are deliberately subtle at night, and storefront interiors still repeat within a theme.
 
 ## 5. How the final checks were run
 

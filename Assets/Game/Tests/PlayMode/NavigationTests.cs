@@ -198,6 +198,43 @@ namespace NeonVelocity.Tests
         }
 
         [UnityTest]
+        public IEnumerator RestartSessionRebuildsTheRunAndResetsDistance()
+        {
+            yield return WaitForApp();
+            var app = GameApp.Instance;
+            app.ShowMainMenu();
+            yield return null;
+
+            app.StartMode(GameModeId.Practice);
+            float deadline = Time.realtimeSinceStartup + 10f;
+            while ((!app.IsInRun || app.Session == null) && Time.realtimeSinceStartup < deadline)
+                yield return null;
+            Assert.IsTrue(app.IsInRun, "Practice session did not start");
+            var first = app.Session;
+
+            // Let the countdown finish and the run advance so the restart has state to clear.
+            yield return new WaitForSecondsRealtime(3.6f);
+            Assert.Greater(first.Distance, 0f, "Practice session did not advance");
+
+            app.RestartSession();
+            deadline = Time.realtimeSinceStartup + 10f;
+            while ((!app.IsInRun || app.Session == first) && Time.realtimeSinceStartup < deadline)
+                yield return null;
+
+            Assert.IsTrue(app.IsInRun, "Restart did not start a run");
+            Assert.IsNotNull(app.Session, "Restart produced no session");
+            Assert.AreNotSame(first, app.Session, "Restart must rebuild the session");
+            Assert.AreEqual(GameModeId.Practice, app.Session.Mode.Id,
+                "Restart must preserve the current mode");
+            Assert.IsFalse(app.Session.IsPaused, "Restart must not resume paused");
+            Assert.Less(app.Session.Distance, 1f, "Restart must begin at the start line");
+
+            app.EndSession(false);
+            yield return null;
+            Assert.IsFalse(app.IsInRun, "Session did not shut down after restart");
+        }
+
+        [UnityTest]
         public IEnumerator GaragePreviewIsDestroyedWhenShopCloses()
         {
             yield return WaitForApp();

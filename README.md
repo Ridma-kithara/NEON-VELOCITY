@@ -2,7 +2,7 @@
 
 **RK VANTAGE GAMES** presents a three-lane, neon-noir endless runner built in **Unity 6000.6.7f1**, **Universal Render Pipeline**, **Input System** and **C#**, with an original authoritative multiplayer backend written in dependency-free **Python**.
 
-> **Verification notice (24 October 2026):** Unity 6000.6.7f1 Personal licensing is active. The project imports and compiles in Unity, **24/24 EditMode** and **8/8 PlayMode** tests pass, and a **universal (Intel + Apple silicon) macOS player** was built, launched and visually exercised. The PlayMode tests cover real boot, main menu, a practice session, clean shutdown, quick-tap jump clearance, navigation/Back routing, settings-from-pause, Results return, garage cleanup and shop purchase confirmation. **50/50** headless core tests, **9/9** Python authority tests and **709** static checks also pass. Eight screens were captured at 1600×900, 1280×800 and an actual 3840×2160 backbuffer, including a seeded subway/station segment. The latest pass adds beveled procedural armour, generated armour materials, wet-road reflection dressing and six synthesized spatial SFX; audio was loaded without missing-resource errors but was not audibly balanced or profiled. A physical 4K display and 4K frame-rate profiling were not available. Other platform builds, real-device input/audio, performance profiling and real-network multiplayer remain unverified. See [QA Report](QA_REPORT.md), [Project Status](PROJECT_STATUS.md), [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
+> **Verification notice (24 October 2026):** Unity 6000.6.7f1 Personal licensing is active. The project imports and compiles in Unity, **24/24 EditMode** and **9/9 PlayMode** tests pass, and a **universal (Intel + Apple silicon) macOS player** was built, launched and visually exercised. The PlayMode tests cover real boot, main menu, a practice session, clean shutdown, quick-tap jump clearance, navigation/Back routing, settings-from-pause, Results return, restart rebuilding a fresh run, garage cleanup and shop purchase confirmation. **50/50** headless core tests, **9/9** Python authority tests and **710/710** static checks also pass. Nine screens were captured at 1600×900, 1280×800 and an actual 3840×2160 backbuffer, including the active biome crossfade and a seeded subway/station segment. The latest pass is the gameplay-environment/atmosphere vertical slice: recessed storefronts, layered facades, street trees and furniture, warm practical light pools, textured rain, an additive glow pass without false shadows and a working 2.6-second biome crossfade. It remains an original stylised procedural interpretation because no authored meshes, textures, rigs or animation clips are available; it is not photoreal AAA. A physical 4K display, 4K frame-rate profiling, Windows builds, real-device input/audio and real-network multiplayer remain unverified. One automated capture run showed an intermittent macOS Metal duplicated-UI readback frame; clean reruns and the final 1280/1600/4K sets were inspected, and live-display behaviour remains unverified. See [Development Progress](Documentation/DEVELOPMENT_PROGRESS.md), [QA Report](QA_REPORT.md), [Project Status](PROJECT_STATUS.md), [Test Report](Documentation/TEST_REPORT.md) and [Known Limitations](Documentation/KNOWN_LIMITATIONS.md) before making platform claims.
 
 ---
 
@@ -40,8 +40,16 @@ Run a rain-slicked city grid that never ends. Switch three lanes, jump low barri
 - **10 power-ups** — magnet, shield, score surge, volt rush, spectre board, phase shell, air jump, time dilation (offline only), credit storm and rare prism dash.
 - **Progression** — credits, XP/levels (1–100), season levels, 5 runners, 4 trails, permanent magnet/shield/multiplier/boost/head-start upgrades, daily and weekly missions, lifetime achievements, daily supply drops and local bests/leaderboards.
 - **Online authority** — quick match and private codes, host-controlled start, server-filled bots to five, 10 Hz validated snapshots, results, verified rewards, leaderboard persistence, 45 s reconnect grace and automatic client reconnection.
-- **Presentation** — runtime-generated URP world (four neon themes) with generated asphalt/concrete/normal maps, a wet multi-layer road, denser skyline and storefront neon, soft shadows, atmospheric mist/rain and cinematic post-processing. Original synthesized music/ambience/14 SFX, speed lines, particles, camera shake, screen fades, toasts and a complete runtime UI. No external art or audio packs.
+- **Presentation** — runtime-generated URP world (four neon themes) with generated asphalt/concrete/normal maps, a wet multi-layer road, recessed storefronts, layered skyline, street lighting, atmospheric mist/rain and cinematic post-processing. Original synthesized music/ambience/14 SFX, speed lines, particles, camera shake, screen fades, toasts and a complete runtime UI. No external art or audio packs.
 - **Offline first** — every single-player mode works without the backend; online is never simulated when the server is absent.
+
+### Environment vertical slice
+
+- **City fabric** — recessed facade blocks with deterministic alley gaps, podiums, balconies, AC units, pipes, rooftop plant, storefront shelving/counters, awnings, shutters, blade signs and abstract billboards.
+- **Street level** — clean lane field, curbs, gutters, drains, raised sidewalks, service aprons, safety rails, benches, bins, street-name signs, lamps and warm practical pools.
+- **Vegetation** — street trees with visible trunks, layered low-poly canopies, planters, metal guards and neon planter edges; all outside the playable lane boundaries.
+- **Weather and light** — generated wet asphalt/normal detail, puddle/reflection cards, textured additive rain, wind slant, splashes, mist, fog, ACES/bloom and a **2.6-second** biome lighting/sky/rain crossfade.
+- **Performance structure** — segmented and pooled world data, material-batched merged decor and a separate no-shadow additive-card renderer. No LOD/occlusion or per-tree wind animation was added in this slice.
 
 ### Controls
 
@@ -112,8 +120,8 @@ Assets/Game/
   Scripts/Editor/BuildTools.cs   Project configuration + platform build entry points
   Scripts/Editor/NeonVelocity.EditorTools.asmdef  Editor-only assembly boundary
   Tests/EditMode/                NUnit core + save tests
-  Tests/PlayMode/                Boot/menu/practice + jump regression tests
-  Resources/Audio/               21 original WAV assets (music, ambience, SFX)
+  Tests/PlayMode/                Boot/menu/practice, jump, navigation and restart tests
+  Resources/Audio/               27 original WAV assets (music, ambience, SFX)
   Resources/Materials/           Pinned URP shader templates used by the runtime
 Backend/
   server.py                      Authoritative asyncio TCP server
@@ -126,6 +134,7 @@ Documentation/
   SETUP.md                       Editor, controls, server and LAN setup
   BUILD.md                       Module installation and build commands
   TEST_REPORT.md                 Actually executed tests and unverified areas
+  DEVELOPMENT_PROGRESS.md        Roadmap, phase status, defects, gaps and next tasks
   KNOWN_LIMITATIONS.md           Honest gaps and operational constraints
   SERVER_PROTOCOL.md             nv1 TCP wire protocol and authority rules
   ASSET_LICENSING.md             Ownership and third-party licence notes
@@ -151,7 +160,7 @@ dotnet run --project Tools/CoreTests/CoreTests.csproj -c Release
 # Backend integration tests
 python3 -m unittest discover -s Backend/tests -v
 
-# Static project integrity (709 checks)
+# Static project integrity (710 checks)
 python3 Tools/validate_project.py
 ```
 
@@ -159,8 +168,8 @@ Unity tests run through the Test Framework and pass in this environment:
 
 ```text
 EditMode: 24 / 24 passed
-PlayMode:  8 / 8 passed (boot, practice, jump, navigation/Back, settings-from-pause,
-           results root, garage cleanup and purchase confirmation)
+PlayMode:  9 / 9 passed (boot, practice, jump, navigation/Back, settings-from-pause,
+           results root, restart, garage cleanup and purchase confirmation)
 ```
 
 Build the verified macOS target:
@@ -174,7 +183,7 @@ UNITY="/Applications/Unity/Hub/Editor/6000.6.7f1/Unity.app/Contents/MacOS/Unity"
 open "Builds/macOS/NeonVelocity.app"
 ```
 
-The build tool configures a universal **x86_64 + ARM64** app, creates the pinned URP material templates and retains the post-processing shaders URP would otherwise strip. The verified output was **117.0 MiB**, ad-hoc signed, and launched successfully on this Intel Mac. A developer-only capture flag (`-nv-capture <directory> -nv-capture-size 3840x2160`) saves menu, settings, shop/garage, mode-select, gameplay and pause screenshots from the built player; it produced actual 3840×2160 PNGs for UI inspection.
+The build tool configures a universal **x86_64 + ARM64** app, creates the pinned URP material templates and retains the post-processing shaders URP would otherwise strip. The verified output was **117.0 MiB**, ad-hoc signed, and launched successfully on this Intel Mac. A developer-only capture flag (`-nv-capture <directory> -nv-capture-size 3840x2160`) saves menu, settings, shop/garage, mode-select, two gameplay frames, a mid-biome transition, the seeded tunnel and pause screenshots from the built player; it produced actual 3840×2160 PNGs for UI and environment inspection. The transition frame is held 0.65 s into the crossfade.
 
 **Build status:** macOS universal player built and launched; editor EditMode/PlayMode tests pass. Windows, Linux, WebGL, Android and iOS builds remain unverified, and no real-device, performance or multi-machine network validation has been performed. Android/iOS modules and SDKs are not available here.
 
@@ -183,6 +192,7 @@ The build tool configures a universal **x86_64 + ARM64** app, creates the pinned
 - [Setup guide](Documentation/SETUP.md)
 - [Build guide](Documentation/BUILD.md)
 - [Test report](Documentation/TEST_REPORT.md)
+- [Development progress](Documentation/DEVELOPMENT_PROGRESS.md)
 - [Known limitations](Documentation/KNOWN_LIMITATIONS.md)
 - [Server protocol](Documentation/SERVER_PROTOCOL.md)
 - [Asset licensing](Documentation/ASSET_LICENSING.md)

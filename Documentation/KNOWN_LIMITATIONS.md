@@ -7,11 +7,11 @@ This document records what is genuinely complete, what is constrained by the cur
 ### Verified in this environment (24 October 2026)
 
 - Unity **6000.6.7f1** imported and compiled the project with **0 errors** after the editor-only assembly boundary was added.
-- **50 / 50** headless gameplay-core tests, **9 / 9** Python authority tests and **709** static checks passed.
+- **50 / 50** headless gameplay-core tests, **9 / 9** Python authority tests and **710** static checks passed.
 - **24 / 24** Unity EditMode tests passed.
-- **8 / 8** Unity PlayMode tests passed: real bootstrap, title stage, Practice start, clean shutdown, quick-tap jump regression, centralized navigation/Back routes, Settings-from-Pause, Results return, garage cleanup and purchase-confirmation safety.
-- Developer-run captures of eight screens at 1600×900, 1280×800 and 3840×2160 confirmed the generated menu, HUD, garage, beveled runner, road, tiered city facades, storefronts, wet reflections and a seeded subway-station segment render in the player. The subway frame uses a temporary time-scale acceleration and hazard clearing. The 4K PNGs are actual 3840×2160 output; no physical 4K display was available. This is a smoke check, not a full manual graphics review.
-- A universal **x86_64 + ARM64** macOS player (`Builds/macOS/NeonVelocity.app`, 117.0 MiB) was built and launched. The final capture run completed without runtime exceptions.
+- **9 / 9** Unity PlayMode tests passed: real bootstrap, title stage, Practice start, clean shutdown, quick-tap jump regression, centralized navigation/Back routes, Settings-from-Pause, Results return, restart into a fresh run, garage cleanup and purchase-confirmation safety.
+- Developer-run captures of **nine screens** at 1600×900, 1280×800 and 3840×2160 confirmed the generated menu, HUD, garage, beveled runner, rain-slicked road, raised sidewalks, recessed storefronts, layered facades, street trees/furniture, warm practical pools, layered skyline, textured rain, an active biome crossfade and a seeded subway-station segment render in the player. The transition frame is held 0.65 s into a real 2.6 s crossfade. The subway frame uses a temporary time-scale acceleration and hazard clearing. The 4K PNGs are actual 3840×2160 output; no physical 4K display was available. This is a smoke check, not a full manual graphics review.
+- A universal **x86_64 + ARM64** macOS player (`Builds/macOS/NeonVelocity.app`, 117.0 MiB) was built and launched. The final capture run completed without runtime exceptions or warnings.
 - The app is **ad-hoc signed** only; there is no Developer ID, hardened runtime or notarisation.
 
 ### Still unverified
@@ -22,6 +22,7 @@ This document records what is genuinely complete, what is constrained by the cur
 - Real-device touch, gamepad, audio, suspend/resume and performance.
 - Frame time, memory, battery and thermal profiling.
 - Audible audio balance, loudness and device output for the 27 synthesized clips; only missing-resource checks were performed.
+- Live physical-display confirmation that an intermittent macOS Metal screenshot-readback artifact (one tiled/duplicated-UI frame, clean on reruns) cannot appear outside the capture harness. Root cause not isolated.
 - Public-internet deployment, TLS, signing, notarisation and store packaging.
 
 ### Platform build status
@@ -96,10 +97,12 @@ Bots fill empty slots to five and are simulated by the server at 17.0–23.5 m/s
 
 - All world geometry, textures, UI and audio are generated from Unity primitives/procedural code and original synthesis. The look/mix is therefore stylized and bounded by that approach.
 - No final art/audio polish pass, platform loudness normalization, mixer snapshot automation or dynamic-range testing has been performed.
-- No frame-time, memory, battery, thermal or loading-time profiling exists for any target. The procedural runtime world and UI may need optimization on low-end Android/iOS devices.
+- No frame-time, memory, battery, thermal or loading-time profiling exists for any target. The procedural runtime world and UI may need optimization on low-end Android/iOS devices. The 4K capture proves output, not a 4K frame-rate target.
+- The environment slice has no explicit LOD, occlusion culling or GPU-instancing pass, and tree/foliage animation is static merged geometry. Street-level light pools and rain are deliberately subtle; storefront interiors repeat within a theme.
 - WebGL autoplay policies may delay or mute audio until user interaction; this is not verified.
 - URP renderer selection and the core runtime shader set have been validated in the built player, but a full visual/quality pass across all four themes and quality presets has not.
 - The runtime generates materials and meshes; repeated rapid restarts could stress memory management. This has not been measured.
+- One automated macOS Metal capture run produced a tiled/duplicated-UI readback image. Clean reruns and the final capture sets were inspected; the artifact was not reproduced by PlayMode tests or found in the player log. It remains a QA-tooling risk until live compositor capture can be checked.
 
 ## 5. Platform/package constraints
 

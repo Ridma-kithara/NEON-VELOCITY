@@ -36,9 +36,46 @@ namespace NeonVelocity.World
         private Transform _cloudA;
         private Transform _cloudB;
         private Material _domeMaterial;
+        private MeshRenderer _domeFadeRenderer;
+        private Material _domeFadeMaterial;
+        private Material _pendingDomeMaterial;
+        private bool _skyFadeActive;
+        private float _skyFadeT;
         private readonly Dictionary<int, Material> _domeMaterials = new Dictionary<int, Material>();
+        private readonly Dictionary<int, Material> _domeFadeMaterials = new Dictionary<int, Material>();
         private readonly Dictionary<int, Material> _cloudMaterials = new Dictionary<int, Material>();
         private readonly Dictionary<int, Cubemap> _reflections = new Dictionary<int, Cubemap>();
+        private const float TransitionSeconds = 2.6f;
+        private float _transition = 1f;
+        private Color _fromFog;
+        private Color _targetFog;
+        private float _fromFogDensity;
+        private float _targetFogDensity;
+        private Color _fromAmbientSky;
+        private Color _targetAmbientSky;
+        private Color _fromAmbientEquator;
+        private Color _targetAmbientEquator;
+        private Color _fromAmbientGround;
+        private Color _targetAmbientGround;
+        private Color _fromSunColor;
+        private Color _targetSunColor;
+        private float _fromSunIntensity;
+        private float _targetSunIntensity;
+        private float _currentSunIntensity;
+        private Color _fromRimColor;
+        private Color _targetRimColor;
+        private Color _fromCyanFill;
+        private Color _targetCyanFill;
+        private Color _fromMagentaFill;
+        private Color _targetMagentaFill;
+        private Color _fromWarmFill;
+        private Color _targetWarmFill;
+        private Color _fromBackground;
+        private Color _targetBackground;
+        private float _rainRate;
+        private float _splashRate;
+        private float _targetRainRate;
+        private float _targetSplashRate;
         private ParticleSystem _rain;
         private ParticleSystemRenderer _rainRenderer;
         private ParticleSystem _splash;
@@ -162,12 +199,14 @@ namespace NeonVelocity.World
             if (_sun != null)
             {
                 _sun.shadows = settings.shadowQuality > 0 ? LightShadows.Soft : LightShadows.None;
-                _sun.intensity = _effectsQuality >= 2 ? 1.18f : (_effectsQuality >= 1 ? 1.0f : 0.68f);
+                _targetSunIntensity = DesiredSunIntensity;
+                if (_transition >= 0.999f) ApplyTransition(1f);
             }
             bool fills = _effectsQuality >= 2;
             if (_cyanFill != null) _cyanFill.enabled = fills;
             if (_magentaFill != null) _magentaFill.enabled = fills;
             if (_warmFill != null) _warmFill.enabled = fills;
+            RenderSettings.ambientIntensity = DesiredAmbientIntensity;
             RenderSettings.reflectionIntensity = _reflectionQuality >= 2 ? 1f
                 : (_reflectionQuality >= 1 ? 0.68f : 0.18f);
             var theme = _theme;
@@ -175,7 +214,7 @@ namespace NeonVelocity.World
             {
                 bool rain = theme.rain || (_app != null && _app.Session != null &&
                             _app.Session.Mode.Id == GameModeId.SeasonalEvent);
-                SetRain(rain);
+                SetRain(rain, false);
             }
         }
 
@@ -209,6 +248,22 @@ namespace NeonVelocity.World
             // Radius 450 keeps the authored stars (r=350) and the moon inside the sky shell.
             domeGo.transform.localScale = Vector3.one * 900f;
             domeGo.transform.position = new Vector3(0f, 0f, 0f);
+
+            // A slightly smaller transparent shell is used only while a biome change is
+            // crossfading. It draws after the opaque dome so the old gradient stays visible
+            // beneath the incoming one until the alpha reaches one.
+            var fadeGo = new GameObject("Sky Crossfade");
+            fadeGo.transform.SetParent(domeGo.transform, false);
+            fadeGo.transform.localPosition = Vector3.zero;
+            fadeGo.transform.localScale = Vector3.one * 0.997f;
+            var fadeFilter = fadeGo.AddComponent<MeshFilter>();
+            fadeFilter.sharedMesh = PrimitiveMeshes.Sphere;
+            _domeFadeRenderer = fadeGo.AddComponent<MeshRenderer>();
+            _domeFadeRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            _domeFadeRenderer.receiveShadows = false;
+            _domeFadeRenderer.lightProbeUsage = LightProbeUsage.Off;
+            _domeFadeRenderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
+            fadeGo.SetActive(false);
 
             // Stars and moon live in an unscaled sibling so their authored world-space radius
             // is not multiplied by the dome scale. Previously they were children of a 380x
@@ -267,28 +322,29 @@ namespace NeonVelocity.World
             main.playOnAwake = false;
             main.startLifetime = 0.9f;
             main.startSpeed = new ParticleSystem.MinMaxCurve(26f, 34f);
-            main.startSize = new ParticleSystem.MinMaxCurve(0.008f, 0.022f);
-            main.startColor = new Color(0.55f, 0.8f, 1f, 0.42f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.04f, 0.085f);
+            main.startColor = new Color(0.72f, 0.86f, 1f, 1f);
             main.gravityModifier = 1.4f;
-            main.maxParticles = _reduced ? 250 : Mathf.RoundToInt(900f * Mathf.Clamp(_quality, 0.4f, 1.5f));
+            main.maxParticles = _reduced ? 300 : Mathf.RoundToInt(1400f * Mathf.Clamp(_quality, 0.4f, 1.5f));
             main.simulationSpace = ParticleSystemSimulationSpace.Local;
             var emission = _rain.emission;
             emission.rateOverTime = 0f;
             var shape = _rain.shape;
             shape.shapeType = ParticleSystemShapeType.Box;
-            shape.scale = new Vector3(34f, 1f, 34f);
+            shape.scale = new Vector3(26f, 1f, 26f);
             shape.position = new Vector3(0f, 0f, 12f);
             var velocity = _rain.velocityOverLifetime;
             velocity.enabled = true;
             velocity.space = ParticleSystemSimulationSpace.Local;
-            velocity.x = new ParticleSystem.MinMaxCurve(0f);
+            velocity.x = new ParticleSystem.MinMaxCurve(2.2f);
             velocity.y = new ParticleSystem.MinMaxCurve(0f);
-            velocity.z = new ParticleSystem.MinMaxCurve(-5.5f);
+            velocity.z = new ParticleSystem.MinMaxCurve(-6.5f);
             _rainRenderer = go.GetComponent<ParticleSystemRenderer>();
-            _rainRenderer.material = MaterialLibrary.Additive(new Color(0.55f, 0.8f, 1f));
+            _rainRenderer.material = MaterialLibrary.AdditiveTextured("NV_RainMaterial",
+                TextureFactory.RainStreak(), new Color(0.55f, 0.75f, 1f, 1f));
             _rainRenderer.renderMode = ParticleSystemRenderMode.Stretch;
-            _rainRenderer.lengthScale = 8.5f;
-            _rainRenderer.velocityScale = 0.1f;
+            _rainRenderer.lengthScale = 7.0f;
+            _rainRenderer.velocityScale = 0.03f;
             _rainRenderer.shadowCastingMode = ShadowCastingMode.Off;
             _rainRenderer.receiveShadows = false;
             _rain.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
@@ -306,7 +362,7 @@ namespace NeonVelocity.World
             sm.startSize = new ParticleSystem.MinMaxCurve(0.018f, 0.055f);
             sm.startColor = new Color(0.6f, 0.85f, 1f, 0.6f);
             sm.gravityModifier = 0.8f;
-            sm.maxParticles = _reduced ? 80 : 420;
+            sm.maxParticles = _reduced ? 100 : 520;
             sm.simulationSpace = ParticleSystemSimulationSpace.Local;
             var se = _splash.emission;
             se.rateOverTime = 0f;
@@ -510,6 +566,7 @@ namespace NeonVelocity.World
             var theme = _app.Config.Theme(_biome);
             if (theme == null) return;
             _theme = theme;
+
             if (!_domeMaterials.TryGetValue(_biome, out Material material))
             {
                 var texture = TextureFactory.VerticalGradient("NV_Sky_" + _biome, theme.skyBottom, theme.skyTop, 256);
@@ -529,16 +586,74 @@ namespace NeonVelocity.World
                 material.renderQueue = 1990;
                 _domeMaterials[_biome] = material;
             }
-            _domeMaterial = material;
-            _dome.GetComponent<MeshRenderer>().sharedMaterial = _domeMaterial;
 
-            RenderSettings.fogColor = theme.fog;
-            RenderSettings.fogDensity = theme.rain ? 0.0100f : 0.0068f;
+            if (immediate)
+            {
+                _domeMaterial = material;
+                _dome.GetComponent<MeshRenderer>().sharedMaterial = _domeMaterial;
+                if (_domeFadeRenderer != null)
+                {
+                    _domeFadeRenderer.gameObject.SetActive(false);
+                    _skyFadeActive = false;
+                }
+                _transition = 1f;
+            }
+            else
+            {
+                // Keep the old dome visible and blend the incoming gradient over it. The
+                // fade shell is slightly closer to the camera, so depth testing lets it
+                // cover the old sky while every building/tree remains in front.
+                _pendingDomeMaterial = material;
+                if (!_domeFadeMaterials.TryGetValue(_biome, out Material fadeMaterial))
+                {
+                    fadeMaterial = MaterialLibrary.UnlitTransparentTextured("NV_SkyFade_" + _biome,
+                        material.mainTexture, new Color(1f, 1f, 1f, 0f), new Vector2(3f, 1f));
+                    if (fadeMaterial.HasProperty("_Cull")) fadeMaterial.SetFloat("_Cull", 1f);
+                    fadeMaterial.renderQueue = 3990;
+                    _domeFadeMaterials[_biome] = fadeMaterial;
+                }
+                _domeFadeMaterial = fadeMaterial;
+                SetFadeAlpha(0f);
+                if (_domeFadeRenderer != null)
+                {
+                    _domeFadeRenderer.sharedMaterial = _domeFadeMaterial;
+                    _domeFadeRenderer.gameObject.SetActive(true);
+                }
+                _skyFadeActive = true;
+                _skyFadeT = 0f;
+                _transition = 0f;
+            }
+
+            // Capture the currently displayed values, not the last target. This allows a
+            // second biome change to interrupt a transition without snapping.
+            _fromFog = RenderSettings.fogColor;
+            _fromFogDensity = RenderSettings.fogDensity;
+            _fromAmbientSky = RenderSettings.ambientSkyColor;
+            _fromAmbientEquator = RenderSettings.ambientEquatorColor;
+            _fromAmbientGround = RenderSettings.ambientGroundColor;
+            _fromSunColor = _sun != null ? _sun.color : Color.white;
+            _fromSunIntensity = _sun != null ? _sun.intensity : 0f;
+            _fromRimColor = _rim != null ? _rim.color : Palette.Magenta;
+            _fromCyanFill = _cyanFill != null ? _cyanFill.color : Palette.Cyan;
+            _fromMagentaFill = _magentaFill != null ? _magentaFill.color : Palette.Magenta;
+            _fromWarmFill = _warmFill != null ? _warmFill.color : Palette.Amber;
+            _fromBackground = _camera != null ? _camera.backgroundColor : theme.skyBottom;
+
+            _targetFog = theme.fog;
+            _targetFogDensity = theme.rain ? 0.0100f : 0.0068f;
+            _targetAmbientSky = Color.Lerp(theme.skyTop, theme.accent, 0.16f);
+            _targetAmbientEquator = Color.Lerp(theme.buildingA, theme.accent, 0.22f);
+            _targetAmbientGround = Color.Lerp(theme.ground, Palette.Void, 0.52f);
+            _targetSunColor = Color.Lerp(new Color(0.72f, 0.84f, 1f), theme.accent, 0.22f);
+            _targetSunIntensity = DesiredSunIntensity;
+            _targetRimColor = Color.Lerp(theme.accent, Palette.Magenta, 0.5f);
+            _targetCyanFill = Color.Lerp(theme.accent, Palette.Cyan, 0.4f);
+            _targetMagentaFill = Color.Lerp(theme.accent, Palette.Magenta, 0.55f);
+            _targetWarmFill = Color.Lerp(Palette.Amber, theme.accent, 0.12f);
+            _targetBackground = theme.skyBottom;
+
             RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = Color.Lerp(theme.skyTop, theme.accent, 0.16f);
-            RenderSettings.ambientEquatorColor = Color.Lerp(theme.buildingA, theme.accent, 0.22f);
-            RenderSettings.ambientGroundColor = Color.Lerp(theme.ground, Palette.Void, 0.52f);
-            RenderSettings.ambientIntensity = _quality >= 2 ? 1.05f : (_quality >= 1 ? 0.9f : 0.72f);
+            RenderSettings.ambientIntensity = DesiredAmbientIntensity;
             RenderSettings.reflectionIntensity = _reflectionQuality >= 2 ? 1f
                 : (_reflectionQuality >= 1 ? 0.68f : 0.18f);
 
@@ -561,48 +676,118 @@ namespace NeonVelocity.World
             if (_cloudA != null) _cloudA.GetComponent<MeshRenderer>().sharedMaterial = cloudMaterial;
             if (_cloudB != null) _cloudB.GetComponent<MeshRenderer>().sharedMaterial = cloudMaterial;
 
-            if (_camera != null)
-            {
-                _camera.backgroundColor = theme.skyBottom;
-            }
-            if (_sun != null)
-            {
-                _sun.color = Color.Lerp(new Color(0.72f, 0.84f, 1f), theme.accent, 0.22f);
-                _sun.intensity = _quality >= 2 ? 1.18f : (_quality >= 1 ? 1.0f : 0.68f);
-            }
-            if (_rim != null) _rim.color = Color.Lerp(theme.accent, Palette.Magenta, 0.5f);
-
-            if (_cyanFill != null) _cyanFill.color = Color.Lerp(theme.accent, Palette.Cyan, 0.4f);
-            if (_magentaFill != null) _magentaFill.color = Color.Lerp(theme.accent, Palette.Magenta, 0.55f);
-            if (_warmFill != null) _warmFill.color = Color.Lerp(Palette.Amber, theme.accent, 0.12f);
-
             if (_trafficRoot != null) _trafficRoot.SetActive(_biome == 0 || _biome == 1);
             if (_trainRoot != null) _trainRoot.SetActive(_biome == 0 || _biome == 1);
             if (_railRoot != null) _railRoot.SetActive(_biome == 0 || _biome == 1);
 
             bool rain = theme.rain || _app != null && _app.Session != null &&
                         _app.Session.Mode.Id == GameModeId.SeasonalEvent;
-            SetRain(rain);
-            if (_rainRenderer != null)
-                _rainRenderer.material = MaterialLibrary.Additive(Color.Lerp(theme.accent, Color.white, 0.5f));
+            SetRain(rain, immediate);
             _camera?.GetComponent<RunnerCamera>()?.SetBiomeColor(theme.accent);
+            ApplyTransition(immediate ? 1f : 0f);
         }
 
-        private void SetRain(bool active)
+        private float DesiredSunIntensity => _quality >= 2f ? 1.18f : (_quality >= 1f ? 1.0f : 0.68f);
+        private float DesiredAmbientIntensity => _quality >= 2f ? 1.05f : (_quality >= 1f ? 0.9f : 0.72f);
+
+        private void SetRain(bool active, bool immediate)
+        {
+            float rainRate = _effectsQuality >= 2 ? 650f : (_effectsQuality >= 1 ? 400f : 220f);
+            float splashRate = _effectsQuality >= 2 ? 220f : (_effectsQuality >= 1 ? 130f : 65f);
+            _targetRainRate = active ? (_reduced ? 80f : rainRate) : 0f;
+            _targetSplashRate = active ? (_reduced ? 30f : splashRate) : 0f;
+            if (immediate)
+            {
+                _rainRate = _targetRainRate;
+                _splashRate = _targetSplashRate;
+                if (_rain != null)
+                {
+                    var emission = _rain.emission;
+                    emission.rateOverTime = _rainRate;
+                    if (active) { if (!_rain.isPlaying) _rain.Play(); }
+                    else if (_rain.isPlaying) _rain.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                }
+                if (_splash != null)
+                {
+                    var emission = _splash.emission;
+                    emission.rateOverTime = _splashRate;
+                    if (active) { if (!_splash.isPlaying) _splash.Play(); }
+                    else if (_splash.isPlaying) _splash.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+                }
+            }
+            else if (active)
+            {
+                if (_rain != null && !_rain.isPlaying) _rain.Play();
+                if (_splash != null && !_splash.isPlaying) _splash.Play();
+            }
+        }
+
+        private void ApplyTransition(float t)
+        {
+            float blend = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t));
+            RenderSettings.fogColor = Color.Lerp(_fromFog, _targetFog, blend);
+            float fogBump = 1f + Mathf.Sin(blend * Mathf.PI) * 0.14f;
+            RenderSettings.fogDensity = Mathf.Lerp(_fromFogDensity, _targetFogDensity, blend) * fogBump;
+            RenderSettings.ambientSkyColor = Color.Lerp(_fromAmbientSky, _targetAmbientSky, blend);
+            RenderSettings.ambientEquatorColor = Color.Lerp(_fromAmbientEquator, _targetAmbientEquator, blend);
+            RenderSettings.ambientGroundColor = Color.Lerp(_fromAmbientGround, _targetAmbientGround, blend);
+            _currentSunIntensity = Mathf.Lerp(_fromSunIntensity, _targetSunIntensity, blend);
+            if (_sun != null)
+            {
+                _sun.color = Color.Lerp(_fromSunColor, _targetSunColor, blend);
+                _sun.intensity = _currentSunIntensity;
+            }
+            if (_rim != null) _rim.color = Color.Lerp(_fromRimColor, _targetRimColor, blend);
+            if (_cyanFill != null) _cyanFill.color = Color.Lerp(_fromCyanFill, _targetCyanFill, blend);
+            if (_magentaFill != null) _magentaFill.color = Color.Lerp(_fromMagentaFill, _targetMagentaFill, blend);
+            if (_warmFill != null) _warmFill.color = Color.Lerp(_fromWarmFill, _targetWarmFill, blend);
+            if (_camera != null) _camera.backgroundColor = Color.Lerp(_fromBackground, _targetBackground, blend);
+        }
+
+        private void UpdateSkyFade(float dt)
+        {
+            if (!_skyFadeActive || _domeFadeRenderer == null) return;
+            _skyFadeT = Mathf.Min(1f, _skyFadeT + dt / (TransitionSeconds * 0.86f));
+            float alpha = Mathf.SmoothStep(0f, 1f, _skyFadeT);
+            SetFadeAlpha(alpha);
+            if (_skyFadeT >= 0.94f && _pendingDomeMaterial != null)
+            {
+                _domeMaterial = _pendingDomeMaterial;
+                _dome.GetComponent<MeshRenderer>().sharedMaterial = _domeMaterial;
+                _skyFadeActive = false;
+                _domeFadeRenderer.gameObject.SetActive(false);
+            }
+        }
+
+        private void SetFadeAlpha(float alpha)
+        {
+            if (_domeFadeMaterial == null) return;
+            var color = new Color(1f, 1f, 1f, alpha);
+            if (_domeFadeMaterial.HasProperty("_BaseColor")) _domeFadeMaterial.SetColor("_BaseColor", color);
+            if (_domeFadeMaterial.HasProperty("_Color")) _domeFadeMaterial.SetColor("_Color", color);
+        }
+
+        private void UpdateRain(float dt)
         {
             if (_rain != null)
             {
+                _rainRate = Mathf.MoveTowards(_rainRate, _targetRainRate,
+                    dt * Mathf.Max(70f, _targetRainRate * 0.8f));
                 var emission = _rain.emission;
-                float rate = _effectsQuality >= 2 ? 440f : (_effectsQuality >= 1 ? 280f : 150f);
-                emission.rateOverTime = active ? (_reduced ? 80f : rate) : 0f;
-                if (active && !_rain.isPlaying) _rain.Play();
+                emission.rateOverTime = _rainRate;
+                if (_targetRainRate > 0.01f && !_rain.isPlaying) _rain.Play();
+                if (_targetRainRate <= 0.01f && _rainRate <= 0.05f && _rain.isPlaying)
+                    _rain.Stop(true, ParticleSystemStopBehavior.StopEmitting);
             }
             if (_splash != null)
             {
+                _splashRate = Mathf.MoveTowards(_splashRate, _targetSplashRate,
+                    dt * Mathf.Max(35f, _targetSplashRate * 0.8f));
                 var emission = _splash.emission;
-                float rate = _effectsQuality >= 2 ? 170f : (_effectsQuality >= 1 ? 100f : 50f);
-                emission.rateOverTime = active ? (_reduced ? 30f : rate) : 0f;
-                if (active && !_splash.isPlaying) _splash.Play();
+                emission.rateOverTime = _splashRate;
+                if (_targetSplashRate > 0.01f && !_splash.isPlaying) _splash.Play();
+                if (_targetSplashRate <= 0.01f && _splashRate <= 0.05f && _splash.isPlaying)
+                    _splash.Stop(true, ParticleSystemStopBehavior.StopEmitting);
             }
         }
 
@@ -619,6 +804,14 @@ namespace NeonVelocity.World
 
             if (_trafficRoot != null && _trafficRoot.activeSelf) UpdateTraffic(dt, p.z);
             if (_trainRoot != null && _trainRoot.activeSelf) UpdateSkyTrain(dt, p.z);
+
+            if (_transition < 1f)
+            {
+                _transition = Mathf.Min(1f, _transition + dt / TransitionSeconds);
+                ApplyTransition(_transition);
+            }
+            UpdateSkyFade(dt);
+            UpdateRain(dt);
 
             if (_biome == 0 && _flash > 0f) _flash = Mathf.Max(0f, _flash - dt * 5.2f);
             if (_biome == 0 && !_reduced && Time.time > _nextFlash)
@@ -638,15 +831,9 @@ namespace NeonVelocity.World
                 }
             }
 
-            var theme = _theme;
-            float baseSun = _quality >= 2 ? 1.18f : (_quality >= 1 ? 1.0f : 0.68f);
-            if (_sun != null) _sun.intensity = baseSun + _flash * 2.4f;
-            if (theme != null)
-            {
-                RenderSettings.ambientSkyColor = Color.Lerp(theme.skyTop, theme.accent, 0.12f);
-                if (_flash > 0.01f)
-                    RenderSettings.ambientSkyColor = Color.Lerp(RenderSettings.ambientSkyColor, Color.white, _flash * 0.45f);
-            }
+            if (_sun != null) _sun.intensity = _currentSunIntensity + _flash * 2.4f;
+            if (_flash > 0.01f)
+                RenderSettings.ambientSkyColor = Color.Lerp(RenderSettings.ambientSkyColor, Color.white, _flash * 0.45f);
             if (_cyanFill != null) _cyanFill.intensity = 10f + _flash * 22f;
             if (_magentaFill != null) _magentaFill.intensity = 8f + _flash * 18f;
         }
@@ -676,6 +863,11 @@ namespace NeonVelocity.World
                 if (kv.Value != null) Destroy(kv.Value);
             }
             _domeMaterials.Clear();
+            foreach (var kv in _domeFadeMaterials)
+            {
+                if (kv.Value != null) Destroy(kv.Value);
+            }
+            _domeFadeMaterials.Clear();
             foreach (var kv in _cloudMaterials)
             {
                 if (kv.Value != null) Destroy(kv.Value);
