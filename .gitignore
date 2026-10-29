@@ -41,6 +41,8 @@ __pycache__/
 
 # Unity recovery copies and local build-profile scaffolding
 *_BackUpThisFolder_ButDontShipItWithYourGame/
+Assets/_Recovery/
+Assets/_Recovery.meta
 Assets/Settings/Build Profiles/
 Assets/Settings/Build Profiles.meta
 

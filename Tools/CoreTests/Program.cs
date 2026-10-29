@@ -23,8 +23,11 @@ namespace NeonVelocity.CoreTests
             LaneTests();
             SpeedTests();
             TrackTests();
+            JunctionTests();
             SaveTests();
             ProgressionTests();
+            LocationTests();
+            TimeOfDayTests();
             RandomTests();
             MissionTests();
             RaceTests();
@@ -271,8 +274,244 @@ namespace NeonVelocity.CoreTests
             });
         }
 
-        private static bool HasDifference(List<SegmentPlan> a, List<SegmentPlan> b)
+        private static void JunctionTests()
         {
+            Run("junction scheduler is deterministic and opens with a long warning", () =>
+            {
+                foreach (int seed in new[] { 1, 42, 777, 481516, -551 })
+                {
+                    int first = JunctionScheduler.FirstSegmentForSeed(seed);
+                    True(first >= JunctionRules.FirstJunctionSegment, "first junction too early");
+                    True(first * TrackDirector.SegmentLength >= 420f, "first junction before the safe opening");
+                    True(!JunctionScheduler.IsJunctionSegment(first - 1, seed), "junction scheduled one segment early");
+                    True(JunctionScheduler.IsJunctionSegment(first, seed), "first junction missing");
+                    True(JunctionScheduler.IsJunctionSegment(first + JunctionRules.SpacingSegments, seed),
+                        "junction spacing should be regular");
+                    var a = JunctionScheduler.ForSegment(first, seed);
+                    var b = JunctionScheduler.ForSegment(first, seed);
+                    NotNull(a);
+                    NotNull(b);
+                    Eq(a.Kind, b.Kind);
+                    Eq(a.SegmentIndex, b.SegmentIndex);
+                    Eq(a.RewardOnLeft, b.RewardOnLeft);
+                }
+            });
+
+            Run("junction cycle exposes all nine authored kinds without an immediate repeat", () =>
+            {
+                var seen = new HashSet<JunctionKind>();
+                foreach (int seed in new[] { 1, 42, 777 })
+                {
+                    JunctionKind previous = JunctionKind.Split;
+                    bool hasPrevious = false;
+                    int first = JunctionScheduler.FirstSegmentForSeed(seed);
+                    for (int n = 0; n < 10; n++)
+                    {
+                        var plan = JunctionScheduler.ForSegment(first + n * JunctionRules.SpacingSegments, seed);
+                        NotNull(plan);
+                        seen.Add(plan.Kind);
+                        if (hasPrevious) True(plan.Kind != previous,
+                            "consecutive junctions must not repeat the same kind");
+                        previous = plan.Kind;
+                        hasPrevious = true;
+                    }
+                }
+                Eq(9, seen.Count, "all junction kinds should appear");
+            });
+
+            Run("curved junction routes stay on the deck and return to centre", () =>
+            {
+                var curved = new JunctionPlan
+                {
+                    Kind = JunctionKind.CurvedRoad,
+                    BranchStartRow = 1,
+                    MergeRow = 5,
+                    CurveSign = -1,
+                    CurveMetres = 1.25f
+                };
+                Eq(0f, JunctionRules.RouteOffsetAt(curved, 6.9f, 1), "before the bend");
+                Eq(0f, JunctionRules.RouteOffsetAt(curved, 35.1f, 1), "after the bend");
+                float peak = 0f;
+                for (float z = 7f; z <= 35f; z += 0.5f)
+                {
+                    float left = JunctionRules.RouteOffsetAt(curved, z, 0);
+                    float right = JunctionRules.RouteOffsetAt(curved, z, 2);
+                    True(Math.Abs(left) <= 1.2501f, "curve left the deck at " + z);
+                    Eq(left, right, "a curved road bends every lane together");
+                    peak = Math.Max(peak, Math.Abs(left));
+                }
+                True(peak > 1.1f, "the bend must displace the road");
+
+                var tee = new JunctionPlan
+                {
+                    Kind = JunctionKind.TJunction,
+                    BranchStartRow = 2,
+                    MergeRow = 5,
+                    CurveMetres = 1.15f
+                };
+                True(JunctionRules.RouteOffsetAt(tee, 21f, 0) < -0.8f, "T left branch must bend");
+                True(JunctionRules.RouteOffsetAt(tee, 21f, 2) > 0.8f, "T right branch must bend");
+                Eq(0f, JunctionRules.RouteOffsetAt(tee, 21f, 1), "T centre is the median");
+
+                var shortcut = new JunctionPlan
+                {
+                    Kind = JunctionKind.Shortcut,
+                    BranchStartRow = 2,
+                    MergeRow = 5,
+                    RewardOnLeft = false,
+                    CurveMetres = 1.45f
+                };
+                True(JunctionRules.RouteOffsetAt(shortcut, 21f, 2) > 1f, "shortcut lane must bend");
+                Eq(0f, JunctionRules.RouteOffsetAt(shortcut, 21f, 0), "main lane stays straight");
+            });
+
+            Run("a centre-lane runner always receives a safe branch commitment", () =>
+            {
+                var tee = new JunctionPlan
+                {
+                    Kind = JunctionKind.TJunction,
+                    CommitRow = 1,
+                    BranchStartRow = 2,
+                    BranchEndRow = 4,
+                    MergeRow = 5,
+                    RewardOnLeft = true
+                };
+                Eq(JunctionBranch.Left, JunctionRules.CommitForLane(0, 0, tee));
+                Eq(JunctionBranch.Right, JunctionRules.CommitForLane(2, 0, tee));
+                Eq(JunctionBranch.Left, JunctionRules.CommitForLane(1, -1, tee));
+                Eq(JunctionBranch.Right, JunctionRules.CommitForLane(1, 1, tee));
+                Eq(JunctionBranch.Left, JunctionRules.CommitForLane(1, 0, tee));
+                Eq(0, JunctionRules.ClampLane(1, tee, JunctionPhase.Branch, JunctionBranch.Left));
+            });
+
+            Run("junction rows are physically connected and navigable", () =>
+            {
+                foreach (int seed in new[] { 1, 42, 777, 481516 })
+                {
+                    int first = JunctionScheduler.FirstSegmentForSeed(seed);
+                    for (int n = 0; n < 8; n++)
+                    {
+                        var plan = JunctionScheduler.ForSegment(first + n * JunctionRules.SpacingSegments, seed);
+                        NotNull(plan);
+                        var rows = new TrackRow[TrackDirector.RowsPerSegment];
+                        JunctionScheduler.ApplyRows(plan, rows);
+                        if (plan.UsesMedian)
+                        {
+                            for (int row = plan.BranchStartRow; row < plan.MergeRow; row++)
+                            {
+                                Eq(CellKind.Solid, rows[row].Centre, "median must block the centre lane");
+                                Eq(CellKind.Empty, rows[row].Left, "left branch must stay connected");
+                                Eq(CellKind.Empty, rows[row].Right, "right branch must stay connected");
+                            }
+                        }
+                        else if (plan.IsNarrowBridge)
+                        {
+                            for (int row = plan.BranchStartRow; row < plan.MergeRow; row++)
+                            {
+                                Eq(CellKind.Empty, rows[row].Centre, "narrow bridge centre must be open");
+                                Eq(CellKind.Solid, rows[row].Left, "narrow bridge left must be closed");
+                                Eq(CellKind.Solid, rows[row].Right, "narrow bridge right must be closed");
+                            }
+                        }
+                        else if (plan.IsBrokenRoad)
+                        {
+                            Eq(CellKind.LowBarrier, rows[2].Left);
+                            Eq(CellKind.LowBarrier, rows[2].Centre);
+                            Eq(CellKind.LowBarrier, rows[2].Right);
+                        }
+                    }
+                }
+            });
+
+            Run("generated tracks containing junctions remain valid and deterministic", () =>
+            {
+                foreach (int seed in new[] { 1, 7, 99, 424242, -551, 481516 })
+                {
+                    var first = new TrackDirector(seed, 2).BuildRange(0, 160);
+                    var second = new TrackDirector(seed, 2).BuildRange(0, 160);
+                    var issues = GeneratedTrackValidator.Validate(first);
+                    Eq(0, issues.Count, "seed " + seed + " -> " + string.Join(" | ", issues));
+                    int junctionCount = 0;
+                    for (int i = 0; i < first.Count; i++)
+                    {
+                        Eq(first[i].PatternId, second[i].PatternId, "deterministic pattern " + i);
+                        if (first[i].Junction == null) continue;
+                        junctionCount++;
+                        Eq(first[i].Junction.SegmentIndex, i, "junction segment index");
+                        Eq(first[i].Junction.Kind.ToString().ToLowerInvariant(),
+                            first[i].PatternId.Substring("junction-".Length), "pattern id should name the junction");
+                    }
+                    True(junctionCount >= 8, "seed " + seed + " should expose several junctions");
+                }
+            });
+
+            Run("junction phases expose a 126 metre warning and a committed branch", () =>
+            {
+                var plan = JunctionScheduler.ForSegment(JunctionScheduler.FirstSegmentForSeed(42), 42);
+                NotNull(plan);
+                float commit = plan.WorldCommitZ;
+                Eq(JunctionPhase.None, JunctionRules.Resolve(plan, commit - JunctionRules.WarningDistanceMetres - 0.1f).Phase);
+                Eq(JunctionPhase.Warning, JunctionRules.Resolve(plan, commit - JunctionRules.WarningDistanceMetres + 0.1f).Phase);
+                Eq(JunctionPhase.Commit, JunctionRules.Resolve(plan, commit + 0.5f).Phase);
+                Eq(JunctionPhase.Branch, JunctionRules.Resolve(plan, plan.WorldBranchStartZ + 0.5f).Phase);
+                Eq(JunctionPhase.Merge, JunctionRules.Resolve(plan, plan.WorldMergeZ + 0.5f).Phase);
+                Eq(JunctionPhase.None, JunctionRules.Resolve(plan, plan.WorldEndZ + 0.5f).Phase);
+                True(JunctionRules.WarningDistanceMetres >= 100, "warning must leave reaction time");
+            });
+
+            Run("branch rules lock the chosen lane and never trap the runner", () =>
+            {
+                var split = JunctionScheduler.ForSegment(JunctionScheduler.FirstSegmentForSeed(42), 42);
+                NotNull(split);
+                Eq(0, JunctionRules.LaneForBranch(JunctionBranch.Left));
+                Eq(2, JunctionRules.LaneForBranch(JunctionBranch.Right));
+                Eq(1, JunctionRules.LaneForBranch(JunctionBranch.Centre));
+                Eq(JunctionBranch.Left, JunctionRules.BranchForLane(0));
+                Eq(JunctionBranch.None, JunctionRules.BranchForLane(1));
+                Eq(JunctionBranch.Right, JunctionRules.BranchForLane(2));
+                Eq(0, JunctionRules.ClampLane(2, split, JunctionPhase.Branch, JunctionBranch.Left));
+                Eq(2, JunctionRules.ClampLane(0, split, JunctionPhase.Branch, JunctionBranch.Right));
+                Eq(2, JunctionRules.ClampLane(2, split, JunctionPhase.Branch, JunctionBranch.None));
+                Eq(0, JunctionRules.ClampLane(0, split, JunctionPhase.Warning, JunctionBranch.None));
+                True(JunctionRules.LaneAllowed(0, split, JunctionPhase.Branch, JunctionBranch.Left));
+                True(!JunctionRules.LaneAllowed(2, split, JunctionPhase.Branch, JunctionBranch.Left));
+            });
+
+            Run("narrow bridges force the centre lane only at the commit", () =>
+            {
+                int seed = 3;
+                int first = JunctionScheduler.FirstSegmentForSeed(seed);
+                JunctionPlan narrow = null;
+                for (int n = 0; n < 10 && narrow == null; n++)
+                {
+                    var plan = JunctionScheduler.ForSegment(first + n * JunctionRules.SpacingSegments, seed);
+                    if (plan != null && plan.IsNarrowBridge) narrow = plan;
+                }
+                NotNull(narrow, "expected a narrow bridge in the cycle");
+                Eq(1, JunctionRules.ClampLane(0, narrow, JunctionPhase.Commit, JunctionBranch.None));
+                Eq(1, JunctionRules.ClampLane(2, narrow, JunctionPhase.Branch, JunctionBranch.None));
+                Eq(2, JunctionRules.ClampLane(2, narrow, JunctionPhase.Warning, JunctionBranch.None));
+            });
+
+            Run("broken road neighbours suppress ordinary full-width patterns", () =>
+            {
+                int seed = 5;
+                int first = JunctionScheduler.FirstSegmentForSeed(seed);
+                JunctionPlan broken = null;
+                int brokenIndex = -1;
+                for (int n = 0; n < 12 && broken == null; n++)
+                {
+                    int index = first + n * JunctionRules.SpacingSegments;
+                    var plan = JunctionScheduler.ForSegment(index, seed);
+                    if (plan != null && plan.IsBrokenRoad) { broken = plan; brokenIndex = index; }
+                }
+                NotNull(broken, "expected a broken road in the cycle");
+                var segments = new TrackDirector(seed, 0).BuildRange(Math.Max(0, brokenIndex - 2), 5);
+                Eq(0, GeneratedTrackValidator.Validate(segments).Count);
+            });
+        }
+
+        private static bool HasDifference(List<SegmentPlan> a, List<SegmentPlan> b)        {
             int count = Math.Min(a.Count, b.Count);
             for (int i = 0; i < count; i++)
             {
@@ -403,13 +642,22 @@ namespace NeonVelocity.CoreTests
 
         private static void ProgressionTests()
         {
-            Run("xp thresholds grow linearly", () =>
+            Run("xp thresholds match the authored curve", () =>
             {
-                Eq(450, ProgressionMath.XpRequiredForLevel(1));
-                Eq(670, ProgressionMath.XpRequiredForLevel(2));
-                Eq(450, ProgressionMath.XpRequiredForLevel(0));
-                Eq(450 + 670, ProgressionMath.TotalXpForLevel(3));
-                Eq(0, ProgressionMath.TotalXpForLevel(1));
+                long[] expected = { 0L, 450L, 900L, 1_800L, 3_000L, 4_500L, 6_500L, 9_000L, 12_000L, 16_000L };
+                for (int level = 1; level <= expected.Length; level++)
+                {
+                    Eq(expected[level - 1], ProgressionMath.TotalXpForLevel(level), "total xp for level " + level);
+                    Eq(level, ProgressionMath.LevelFromXp(expected[level - 1]), "level at threshold " + level);
+                    if (level > 1)
+                        Eq(level - 1, ProgressionMath.LevelFromXp(expected[level - 1] - 1L),
+                            "one xp below level " + level);
+                }
+                Eq(4_480L, ProgressionMath.XpRequiredForLevel(10));
+                Eq(20_480L, ProgressionMath.TotalXpForLevel(11));
+                Eq(LevelProgression.RequirementCap, ProgressionMath.XpRequiredForLevel(1_000));
+                Eq(500, ProgressionMath.LevelFromXp(ProgressionMath.TotalXpForLevel(500)));
+                Eq(LevelProgression.MaxLevel, ProgressionMath.LevelFromXp(long.MaxValue));
             });
 
             Run("levels derive from cumulative xp", () =>
@@ -417,34 +665,41 @@ namespace NeonVelocity.CoreTests
                 Eq(1, ProgressionMath.LevelFromXp(0));
                 Eq(1, ProgressionMath.LevelFromXp(449));
                 Eq(2, ProgressionMath.LevelFromXp(450));
-                Eq(2, ProgressionMath.LevelFromXp(1119));
-                Eq(3, ProgressionMath.LevelFromXp(1120));
+                Eq(2, ProgressionMath.LevelFromXp(899));
+                Eq(3, ProgressionMath.LevelFromXp(900));
+                Eq(3, ProgressionMath.LevelFromXp(1_799));
+                Eq(4, ProgressionMath.LevelFromXp(1_800));
                 Eq(1, ProgressionMath.LevelFromXp(-999));
-                Eq(0, ProgressionMath.XpIntoCurrentLevel(450));
-                Eq(100, ProgressionMath.XpIntoCurrentLevel(550));
-                Near(100f / 670f, ProgressionMath.LevelProgress(550), 0.0001f);
-                Eq(1f, ProgressionMath.LevelProgress(ProgressionMath.TotalXpForLevel(100)));
+                Eq(0L, ProgressionMath.XpIntoCurrentLevel(450));
+                Eq(100L, ProgressionMath.XpIntoCurrentLevel(550));
+                Near(100f / 450f, ProgressionMath.LevelProgress(550), 0.0001f);
+                Eq(0f, ProgressionMath.LevelProgress(ProgressionMath.TotalXpForLevel(100)));
             });
 
-            Run("adding xp reports every level gained", () =>
+            Run("adding xp reports every level gained without loss", () =>
             {
-                int xp = 0;
+                long xp = 0;
                 int gained = ProgressionMath.AddXp(ref xp, 500, out int level);
-                Eq(500, xp);
+                Eq(500L, xp);
                 Eq(1, gained);
                 Eq(2, level);
                 gained = ProgressionMath.AddXp(ref xp, 620, out level);
-                Eq(1120, xp);
+                Eq(1120L, xp);
                 Eq(1, gained);
                 Eq(3, level);
                 gained = ProgressionMath.AddXp(ref xp, -500, out level);
-                Eq(1120, xp);
+                Eq(1120L, xp);
                 Eq(0, gained);
                 Eq(3, level);
                 xp = ProgressionMath.TotalXpForLevel(100);
                 gained = ProgressionMath.AddXp(ref xp, 100000, out level);
                 Eq(100, level);
                 Eq(0, gained);
+
+                xp = 449L;
+                Eq(1, ProgressionMath.AddXp(ref xp, 1L, out level));
+                Eq(450L, xp);
+                Eq(2, level);
             });
 
             Run("run scoring combines distance, coins and bonuses", () =>
@@ -502,6 +757,114 @@ namespace NeonVelocity.CoreTests
                 False(DailyRewards.CanClaim("2026-10-22T00:01:00Z", today));
                 True(DailyRewards.CanClaim("2026-10-21T23:59:00Z", today));
                 True(DailyRewards.CanClaim("garbage", today));
+            });
+        }
+
+        private static void LocationTests()
+        {
+            Run("districts map to exact three-kilometre zones", () =>
+            {
+                Eq(20, LocationCatalog.Count);
+                Eq(20, LocationCatalog.All.Length);
+                Eq(3_000f, LocationCatalog.ZoneLength);
+                Eq(0, LocationCatalog.ZoneIndexForDistance(0f));
+                Eq(0, LocationCatalog.ZoneIndexForDistance(2_999f));
+                Eq(1, LocationCatalog.ZoneIndexForDistance(3_000f));
+                Eq(2, LocationCatalog.ZoneIndexForDistance(6_000f));
+                Eq(10, LocationCatalog.ZoneIndexForDistance(30_000f));
+                Eq(0, LocationCatalog.IndexForDistance(60_000f));
+                Eq(LocationCatalog.All[0].id, LocationCatalog.Get(20).id);
+                Eq(LocationCatalog.ZoneLength * 20f, LocationCatalog.ZoneStart(20), "zone 20 start");
+                True(LocationCatalog.SegmentCrossesBoundary(2_982f, 42f),
+                    "the segment containing 3,000 m must be a transition segment");
+            });
+
+            Run("districts are unique and never repeat back-to-back", () =>
+            {
+                var ids = new HashSet<string>();
+                var names = new HashSet<string>();
+                var signatures = new HashSet<int>();
+                for (int i = 0; i < LocationCatalog.All.Length; i++)
+                {
+                    True(ids.Add(LocationCatalog.All[i].id), "duplicate id " + LocationCatalog.All[i].id);
+                    True(names.Add(LocationCatalog.All[i].displayName), "duplicate name " + LocationCatalog.All[i].displayName);
+                    True(signatures.Add(LocationCatalog.All[i].signature),
+                        "duplicate landmark signature " + LocationCatalog.All[i].signature);
+                    True(LocationCatalog.All[i].accentHex.StartsWith("#", StringComparison.Ordinal),
+                        "accent should be a hex string");
+                }
+                Eq(20, signatures.Count, "every district needs a wired landmark");
+                for (int zone = 0; zone < LocationCatalog.Count * 3; zone++)
+                    True(LocationCatalog.Get(zone).id != LocationCatalog.Get(zone + 1).id,
+                        "district repeated at zone " + zone);
+            });
+
+            Run("all twenty required location themes are present and distinct", () =>
+            {
+                var themes = new HashSet<string>();
+                foreach (var location in LocationCatalog.All)
+                    True(themes.Add(location.themeName), "duplicate theme " + location.themeName);
+                foreach (string required in LocationCatalog.RequiredThemeNames)
+                    True(themes.Contains(required), "missing required theme " + required);
+                Eq(LocationCatalog.RequiredThemeNames.Length, themes.Count,
+                    "the catalogue must contain exactly the twenty requested themes");
+            });
+
+            Run("locations carry valid weather, time of day and structural style", () =>
+            {
+                foreach (var location in LocationCatalog.All)
+                {
+                    True(location.weather >= 0 && location.weather <= 5,
+                        location.id + " has an invalid weather code");
+                    True(location.timeOfDay >= 0 && location.timeOfDay <= 6,
+                        location.id + " has an invalid time of day");
+                    True(location.style >= 0 && location.style <= 20,
+                        location.id + " has an unwired structural style");
+                    True(location.signature >= 0 && location.signature <= 19,
+                        location.id + " has an unwired signature");
+                }
+                var styles = new HashSet<int>();
+                foreach (var location in LocationCatalog.All) styles.Add(location.style);
+                True(styles.Count >= 9, "expected at least nine distinct architecture families");
+            });
+
+            Run("discovery is remembered per district", () =>
+            {
+                var discovered = new List<string>();
+                True(LocationCatalog.IsNewDiscovery(3, discovered));
+                discovered.Add(LocationCatalog.Get(3).id);
+                False(LocationCatalog.IsNewDiscovery(3, discovered));
+                False(LocationCatalog.IsNewDiscovery(3 + LocationCatalog.Count, discovered));
+                True(LocationCatalog.IsNewDiscovery(4, discovered));
+            });
+        }
+
+        private static void TimeOfDayTests()
+        {
+            Run("time of day exposes seven authored states and a smooth cycle", () =>
+            {
+                Eq(7, TimeOfDayCatalog.Count);
+                Eq(TimeOfDayPhase.Evening, TimeOfDayCatalog.ForDistance(0f).Phase);
+                Eq(TimeOfDayPhase.Sunset, TimeOfDayCatalog.ForDistance(3_000f).Phase);
+                Eq(TimeOfDayPhase.Night, TimeOfDayCatalog.ForDistance(6_000f).Phase);
+                Eq(TimeOfDayPhase.LateNight, TimeOfDayCatalog.ForDistance(9_000f).Phase);
+                Eq(TimeOfDayPhase.EarlyMorning, TimeOfDayCatalog.ForDistance(12_000f).Phase);
+                Eq(TimeOfDayPhase.Morning, TimeOfDayCatalog.ForDistance(15_000f).Phase);
+                Eq(TimeOfDayPhase.Afternoon, TimeOfDayCatalog.ForDistance(18_000f).Phase);
+                Eq(TimeOfDayPhase.Evening, TimeOfDayCatalog.ForDistance(21_000f).Phase);
+                Eq(TimeOfDayPhase.LateNight, TimeOfDayCatalog.ForDistance(30_000f).Phase);
+
+                var blend = TimeOfDayCatalog.ForDistance(7_500f);
+                Eq(TimeOfDayPhase.Night, blend.Phase);
+                True(blend.PhaseBlend > 0.4f && blend.PhaseBlend < 0.6f,
+                    "the cycle must blend progressively rather than snap");
+
+                Eq(TimeOfDayPhase.Sunset,
+                    TimeOfDayCatalog.Resolve(0, 2, 6_000f, (int)TimeOfDayPhase.Sunset).Phase);
+                Eq(TimeOfDayPhase.Night,
+                    TimeOfDayCatalog.Resolve(1, 2, 6_000f, (int)TimeOfDayPhase.Sunset).Phase);
+                Eq(TimeOfDayPhase.Afternoon,
+                    TimeOfDayCatalog.Resolve(2, 2, 6_000f, (int)TimeOfDayPhase.Sunset).Phase);
             });
         }
 
@@ -723,7 +1086,7 @@ namespace NeonVelocity.CoreTests
             Run("every game mode is present and uniquely defined", () =>
             {
                 var ids = new HashSet<GameModeId>();
-                Eq(11, GameModes.All.Count, "mode count");
+                Eq(15, GameModes.All.Count, "mode count");
                 foreach (var mode in GameModes.All)
                 {
                     True(ids.Add(mode.Id), "duplicate mode " + mode.Id);

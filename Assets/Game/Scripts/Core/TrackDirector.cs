@@ -15,6 +15,8 @@ namespace NeonVelocity.Core
         public bool IsBonus;
         public bool IsEvent;
         public int Seed;
+        /// <summary>Authored junction overriding the segment rows, or null for ordinary track.</summary>
+        public JunctionPlan Junction;
     }
 
     /// <summary>
@@ -33,9 +35,6 @@ namespace NeonVelocity.Core
 
         private readonly int _seed;
         private readonly int _modeSalt;
-        private TrackPattern _lastPattern;
-        private TrackPattern _secondLastPattern;
-        private float _lastFullWidthActionDistance = -1000f;
         private readonly Dictionary<int, SegmentPlan> _plans = new Dictionary<int, SegmentPlan>();
 
         public TrackDirector(int seed, int modeSalt = 0)
@@ -60,11 +59,13 @@ namespace NeonVelocity.Core
             if (_plans.TryGetValue(index, out SegmentPlan cached)) return cached;
             var plan = BuildSegment(index);
             _plans[index] = plan;
-            // Keep memory bounded for very long runs.
-            if (_plans.Count > 256)
+            // Keep memory bounded for very long runs, even with random access.
+            if (_plans.Count > 192)
             {
-                int oldest = index - 128;
-                _plans.Remove(oldest);
+                int oldest = int.MaxValue;
+                foreach (int key in _plans.Keys)
+                    if (key < oldest) oldest = key;
+                if (oldest != int.MaxValue) _plans.Remove(oldest);
             }
             return plan;
         }
@@ -85,67 +86,86 @@ namespace NeonVelocity.Core
         {
             var rng = new DeterministicRandom(unchecked(_seed + index * 73856093 + _modeSalt * 19349663));
             int worldDistance = index * RowsPerSegment;
-            // The first eight segments establish the neon-city fantasy for every seed before
-            // the deterministic biome rotation starts. All peers still derive the same plan.
-            int biome = index < 8 ? 0 : ((index / 4) + Math.Abs(_seed % 4)) % 4;
+            // Locations are a pure function of distance. The opening 3,000 m always resolves
+            // to SAKURA CIRCUIT (zone 0), so every seed starts in the same readable district.
+            int biome = LocationCatalog.IndexForDistance(index * SegmentLength);
             int difficulty = DifficultyForIndex(index);
             var rows = new TrackRow[RowsPerSegment];
             for (int i = 0; i < rows.Length; i++) rows[i] = new TrackRow(CellKind.Empty, CellKind.Empty, CellKind.Empty);
 
+            var junction = JunctionScheduler.ForSegment(index, _seed);
+            // A broken road is a full-width jump. Ordinary full-width patterns are kept out of
+            // the neighbouring segments so the authored 30 m action-spacing guarantee survives
+            // the junction override.
+            bool nearBrokenRoad = JunctionScheduler.IsBrokenRoadNeighbour(index, _seed);
+
             bool safe = index < SafeOpeningSegments;
             bool bonus = !safe && rng.Chance(0.11f);
-            bool specialEvent = !safe && !bonus && rng.Chance(0.06f);
+            bool specialEvent = !safe && !bonus && rng.Chance(0.07f);
             string patternId = safe ? "opening" : "bonus-arc";
 
             if (!safe)
             {
+                // Full-width actions are confined to every third segment so the 33 m global
+                // cooldown can be proven without carrying mutable state. This keeps random
+                // access (seeks, live revive, tests) byte-identical to forward streaming.
+                bool fullWidthSlot = index % 3 == 2;
                 var candidates = new List<TrackPattern>();
                 for (int i = 0; i < TrackPatternLibrary.All.Length; i++)
                 {
                     var p = TrackPatternLibrary.All[i];
                     if (p.MinDifficulty > difficulty) continue;
-                    if (p == _lastPattern || p == _secondLastPattern) continue;
                     if (p.Rows.Length > RowsPerSegment) continue;
-                    float placementZ = (worldDistance + (index < SafeOpeningSegments ? 0 : 0)) * RowSpacing;
-                    if (ContainsFullWidthAction(p) && !CanPlaceFullWidthPattern(index, placementZ)) continue;
+                    if (ContainsFullWidthAction(p) && (!fullWidthSlot || nearBrokenRoad)) continue;
                     candidates.Add(p);
+                }
+
+                // At high tiers, favour the hardest authored patterns while always leaving
+                // recovery patterns in the pool so a run can never become impossible.
+                if (difficulty >= 5 && candidates.Count > 2)
+                {
+                    var harder = candidates.FindAll(p => p.MinDifficulty >= difficulty - 2);
+                    if (harder.Count >= 2) candidates = harder;
                 }
 
                 if (candidates.Count == 0)
                 {
-                    _lastPattern = null;
+                    if (junction != null)
+                    {
+                        JunctionScheduler.ApplyRows(junction, rows);
+                        patternId = "junction-" + junction.Kind.ToString().ToLowerInvariant();
+                    }
                     return new SegmentPlan
                     {
                         Index = index, BiomeIndex = biome, DifficultyTier = difficulty,
-                        PatternId = "recovery", Rows = rows, WorldStartZ = index * SegmentLength,
-                        IsSafe = true, Seed = rng.NextUInt().GetHashCode()
+                        PatternId = junction != null ? patternId : "recovery", Rows = rows,
+                        WorldStartZ = index * SegmentLength, IsSafe = junction == null,
+                        IsEvent = junction != null, Seed = (int)rng.NextUInt(), Junction = junction
                     };
                 }
 
-                // Bias toward bonus coin patterns in Coin Rush (callers pass a coin-rich salt).
-                TrackPattern chosen = candidates[rng.Range(0, candidates.Count)];
+                TrackPattern chosen;
                 if (bonus)
                 {
                     var coinPatterns = candidates.FindAll(p => p.CoinRich);
-                    if (coinPatterns.Count > 0) chosen = coinPatterns[rng.Range(0, coinPatterns.Count)];
-                    else chosen = candidates[rng.Range(0, candidates.Count)];
+                    chosen = coinPatterns.Count > 0
+                        ? coinPatterns[rng.Range(0, coinPatterns.Count)]
+                        : candidates[rng.Range(0, candidates.Count)];
                 }
+                else chosen = candidates[rng.Range(0, candidates.Count)];
 
                 patternId = chosen.Id;
-                int rowOffset = 0;
-                for (int r = 0; r < chosen.Rows.Length && r < rows.Length; r++)
-                {
-                    int logicalRow = worldDistance + rowOffset + r;
-                    rows[r] = chosen.Rows[r];
-                }
-
-                if (ContainsFullWidthAction(chosen))
-                    _lastFullWidthActionDistance = (index * RowsPerSegment + FirstFullWidthRow(chosen)) * RowSpacing;
-
-                _secondLastPattern = _lastPattern;
-                _lastPattern = chosen;
+                for (int r = 0; r < chosen.Rows.Length && r < rows.Length; r++) rows[r] = chosen.Rows[r];
             }
 
+            if (junction != null)
+            {
+                JunctionScheduler.ApplyRows(junction, rows);
+                patternId = "junction-" + junction.Kind.ToString().ToLowerInvariant();
+                safe = false;
+            }
+
+            int previousLocation = index <= 0 ? biome : LocationCatalog.IndexForDistance((index - 1) * SegmentLength);
             return new SegmentPlan
             {
                 Index = index,
@@ -156,17 +176,10 @@ namespace NeonVelocity.Core
                 WorldStartZ = index * SegmentLength,
                 IsSafe = safe,
                 IsBonus = bonus || (safe && index == 1),
-                IsEvent = specialEvent,
-                Seed = (int)rng.NextUInt()
+                IsEvent = specialEvent || junction != null || biome != previousLocation,
+                Seed = (int)rng.NextUInt(),
+                Junction = junction
             };
-        }
-
-        private bool CanPlaceFullWidthPattern(int index, float unused)
-        {
-            // Full-width actions only start in the first two rows and must respect the
-            // global cooldown from the previous full-width pattern.
-            float startDistance = index * SegmentLength;
-            return startDistance - _lastFullWidthActionDistance >= FullWidthActionCooldown;
         }
 
         private static bool ContainsFullWidthAction(TrackPattern p)
@@ -199,7 +212,11 @@ namespace NeonVelocity.Core
             if (distance < 1100f) return 1;
             if (distance < 2200f) return 2;
             if (distance < 4000f) return 3;
-            return 4;
+            if (distance < 6500f) return 4;
+            if (distance < 9500f) return 5;
+            if (distance < 13500f) return 6;
+            if (distance < 19000f) return 7;
+            return 8;
         }
 
         public static int SeedForRun(string modeId, DateTime utc, string playerId = "")

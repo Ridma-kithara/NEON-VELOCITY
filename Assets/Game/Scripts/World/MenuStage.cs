@@ -24,6 +24,12 @@ namespace NeonVelocity.World
         private Transform _cloudA;
         private Transform _cloudB;
         private float _orbit;
+        private Transform _halo;
+        private readonly List<Transform> _traffic = new List<Transform>();
+        private readonly List<float> _trafficPhase = new List<float>();
+        private readonly List<float> _trafficSpeed = new List<float>();
+        private readonly List<float> _trafficHeight = new List<float>();
+        private readonly List<float> _trafficDepth = new List<float>();
 
         public Camera Camera => _camera;
 
@@ -230,6 +236,22 @@ namespace NeonVelocity.World
                 seg.transform.localRotation = Quaternion.Euler(0f, 0f, angle * Mathf.Rad2Deg + 90f);
                 seg.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
             }
+
+            // Showcase halo: a counter-rotating light pool locked to the hero's feet.
+            var haloGo = new GameObject("Hero Halo");
+            haloGo.transform.SetParent(transform, false);
+            haloGo.transform.localPosition = new Vector3(0f, 0.075f, -1.4f);
+            _halo = haloGo.transform;
+            for (int i = 0; i < 20; i++)
+            {
+                float angle = i / 20f * Mathf.PI * 2f;
+                var seg = PrimitiveMeshes.Box(haloGo.transform, "H" + i,
+                    new Vector3(Mathf.Cos(angle) * 1.35f, 0f, Mathf.Sin(angle) * 1.35f),
+                    new Vector3(0.34f, 0.02f, 0.03f),
+                    i % 3 == 0 ? mats.magenta : mats.cyan);
+                seg.transform.localRotation = Quaternion.Euler(0f, angle * Mathf.Rad2Deg, 0f);
+                seg.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+            }
         }
 
         private void BuildSkyline()
@@ -240,33 +262,72 @@ namespace NeonVelocity.World
             var cyan = Lit(Palette.Cyan, 0.1f, 0.8f, Palette.Cyan, 2.4f);
             var magenta = Lit(Palette.Magenta, 0.1f, 0.8f, Palette.Magenta, 2.2f);
             var amber = Lit(Palette.Amber, 0.1f, 0.8f, Palette.Amber, 1.9f);
-            var facade = MaterialLibrary.UnlitTextured("NV_MenuFacade",
+            var facadeA = MaterialLibrary.UnlitTextured("NV_MenuFacadeA",
                 TextureFactory.WindowFacade(424242), new Color(0.85f, 0.94f, 1f), new Vector2(2f, 3.6f));
             var facadeB = MaterialLibrary.UnlitTextured("NV_MenuFacadeB",
                 TextureFactory.WindowFacade(909090), new Color(1f, 0.78f, 0.9f), new Vector2(2.4f, 3.2f));
+            var facadeC = MaterialLibrary.UnlitTextured("NV_MenuFacadeC",
+                TextureFactory.WindowFacade(131313, 0), new Color(0.82f, 1f, 0.95f), new Vector2(1.7f, 3.1f));
 
-            for (int i = 0; i < 26; i++)
+            // Mid layer: window-lit towers framing the hero on both flanks.
+            for (int i = 0; i < 7; i++)
             {
                 int side = i % 2 == 0 ? -1 : 1;
-                float x = side * rng.Range(11f, 34f);
-                float z = -9f - rng.Range(0f, 62f);
+                float x = side * rng.Range(11f, 40f);
+                float z = -9f - rng.Range(0f, 66f);
                 float w = rng.Range(3.5f, 9f);
                 float d = rng.Range(4f, 11f);
-                float h = rng.Range(8f, 42f);
+                float h = rng.Range(9f, 58f);
+                Material skin = h > 34f ? facadeA
+                    : (rng.Chance(0.55f) ? facadeB : (rng.Chance(0.45f) ? facadeC : mid));
                 var body = PrimitiveMeshes.Box(transform, "Tower" + i, new Vector3(x, h * 0.5f, z),
-                    new Vector3(w, h, d), i % 3 == 0 ? facade : (i % 3 == 1 ? facadeB : mid));
+                    new Vector3(w, h, d), skin);
                 body.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
                 PrimitiveMeshes.Box(transform, "TowerCap" + i, new Vector3(x, h + 0.2f, z),
                     new Vector3(w + 0.3f, 0.4f, d + 0.3f), dark);
-                var stripe = PrimitiveMeshes.Box(transform, "TowerStripe" + i,
-                    new Vector3(x - side * (w * 0.5f + 0.04f), h * 0.6f, z),
-                    new Vector3(0.08f, h * 0.6f, 0.15f), i % 2 == 0 ? cyan : magenta);
-                stripe.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
-                if (rng.Chance(0.35f))
+                if (rng.Chance(0.62f))
                 {
-                    PrimitiveMeshes.Box(transform, "Antenna" + i, new Vector3(x, h + 2.2f, z),
-                        new Vector3(0.08f, 4f, 0.08f), amber).GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                    var stripe = PrimitiveMeshes.Box(transform, "TowerStripe" + i,
+                        new Vector3(x - side * (w * 0.5f + 0.04f), h * 0.62f, z),
+                        new Vector3(0.08f, h * rng.Range(0.4f, 0.8f), 0.15f), i % 2 == 0 ? cyan : magenta);
+                    stripe.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
                 }
+                if (h > 30f && rng.Chance(0.55f))
+                {
+                    for (int m = 0; m < 3; m++)
+                    {
+                        var mast = PrimitiveMeshes.Box(transform, "TowerMast" + i + "_" + m,
+                            new Vector3(x - w * 0.28f + m * w * 0.28f, h + rng.Range(1.6f, 3.6f), z),
+                            new Vector3(0.07f, rng.Range(2.2f, 4.8f), 0.07f), mid);
+                        mast.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                    }
+                }
+                if (rng.Chance(0.4f))
+                {
+                    var beacon = PrimitiveMeshes.SphereObject(transform, "Beacon" + i, new Vector3(x, h + 0.75f, z),
+                        0.16f, rng.Chance(0.5f) ? amber : cyan);
+                    beacon.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                }
+            }
+
+            // Far layer: silhouette masses behind the atmospheric haze.
+            for (int i = 0; i < 3; i++)
+            {
+                int side = i % 2 == 0 ? -1 : 1;
+                float x = side * rng.Range(46f, 96f);
+                float z = -52f - rng.Range(0f, 40f);
+                float w = rng.Range(6f, 14f);
+                float h = rng.Range(26f, 96f);
+                var body = PrimitiveMeshes.Box(transform, "FarTower" + i, new Vector3(x, h * 0.5f, z),
+                    new Vector3(w, h, rng.Range(6f, 16f)), mid);
+                body.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                var haze = PrimitiveMeshes.Create("FarHaze" + i, PrimitiveMeshes.Quad,
+                    MaterialLibrary.Additive(i % 2 == 0 ? Palette.Cyan : Palette.Magenta), transform,
+                    new Vector3(x * 0.82f, h * 0.4f, z + 9f),
+                    new Vector3(w * 1.7f, h * 0.55f, 1f));
+                var hazeR = haze.GetComponent<MeshRenderer>();
+                hazeR.shadowCastingMode = ShadowCastingMode.Off;
+                hazeR.receiveShadows = false;
             }
 
             var signMaterial = MaterialLibrary.UnlitTextured("NV_MenuSignA",
@@ -275,19 +336,73 @@ namespace NeonVelocity.World
             var signMaterialB = MaterialLibrary.UnlitTextured("NV_MenuSignB",
                 TextureFactory.BillboardArt(8181, Palette.Magenta, 2),
                 new Color(1.3f, 1.3f, 1.3f, 1f), Vector2.one);
-            for (int i = 0; i < 6; i++)
+            var signMaterialC = MaterialLibrary.UnlitTextured("NV_MenuSignC",
+                TextureFactory.BillboardArt(4747, Palette.Amber, 0),
+                new Color(1.25f, 1.25f, 1.25f, 1f), Vector2.one);
+            for (int i = 0; i < 8; i++)
             {
                 float side = i % 2 == 0 ? -1f : 1f;
-                float x = side * rng.Range(9.5f, 13.5f);
+                float x = side * rng.Range(9.5f, 14.5f);
                 float z = -12f - i * 7.5f - rng.Range(0f, 3f);
-                float y = rng.Range(3.4f, 7.5f);
+                float y = rng.Range(3.4f, 8.5f);
+                Material signSkin = i % 3 == 2 ? signMaterialC : (i % 2 == 0 ? signMaterial : signMaterialB);
                 var sign = PrimitiveMeshes.Box(transform, "BladeSign" + i,
-                    new Vector3(x, y, z), new Vector3(1.15f, 2.8f, 0.08f),
-                    i % 2 == 0 ? signMaterial : signMaterialB);
+                    new Vector3(x, y, z), new Vector3(1.15f, 2.8f, 0.08f), signSkin);
                 sign.GetComponent<MeshRenderer>().shadowCastingMode = ShadowCastingMode.Off;
                 PrimitiveMeshes.Box(transform, "SignArm" + i, new Vector3(x + side * 0.45f, y + 1.55f, z),
                     new Vector3(0.9f, 0.06f, 0.08f), mid);
             }
+
+            // Skybridges: lit glass decks crossing the street canyon between towers.
+            for (int i = 0; i < 2; i++)
+            {
+                float y = 15.5f + i * 10.5f;
+                float z = -21f - i * 16f;
+                float span = rng.Range(23f, 32f);
+                var deck = PrimitiveMeshes.Box(transform, "SkyBridge" + i, new Vector3(0f, y, z),
+                    new Vector3(span, 0.55f, 2.7f), dark);
+                deck.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                PrimitiveMeshes.Box(transform, "BridgeDeck" + i, new Vector3(0f, y + 0.36f, z),
+                    new Vector3(span, 0.1f, 2.2f), mid);
+                var bridgeGlow = PrimitiveMeshes.Box(transform, "BridgeGlow" + i, new Vector3(0f, y - 0.41f, z),
+                    new Vector3(span * 0.92f, 0.07f, 0.18f), i % 2 == 0 ? cyan : magenta);
+                bridgeGlow.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                for (int rail = 0; rail < 6; rail++)
+                {
+                    float railX = -span * 0.45f + rail * span * 0.18f;
+                    PrimitiveMeshes.Box(transform, "BridgeRail" + i + "_" + rail, new Vector3(railX, y + 0.9f, z - 1.2f),
+                        new Vector3(0.06f, 0.7f, 0.06f), mid).GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                    PrimitiveMeshes.Box(transform, "BridgeRailBack" + i + "_" + rail, new Vector3(railX, y + 0.9f, z + 1.2f),
+                        new Vector3(0.06f, 0.7f, 0.06f), mid).GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                }
+                PrimitiveMeshes.Box(transform, "BridgeBeamFront" + i, new Vector3(0f, y + 0.85f, z - 1.2f),
+                    new Vector3(span, 0.07f, 0.07f), mid);
+                PrimitiveMeshes.Box(transform, "BridgeBeamBack" + i, new Vector3(0f, y + 0.85f, z + 1.2f),
+                    new Vector3(span, 0.07f, 0.07f), mid);
+            }
+
+            // Elevated airway with lantern pylons running behind the runner.
+            {
+                float y = 12.8f;
+                float z = -34f;
+                var deck = PrimitiveMeshes.Box(transform, "AirwayDeck", new Vector3(0f, y, z),
+                    new Vector3(84f, 0.6f, 3.4f), dark);
+                deck.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                PrimitiveMeshes.Box(transform, "AirwayGlowFront", new Vector3(0f, y - 0.44f, z - 1.5f),
+                    new Vector3(82f, 0.05f, 0.14f), cyan).GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                for (int p = 0; p < 8; p++)
+                {
+                    float px = -34f + p * 9.6f;
+                    var pylon = PrimitiveMeshes.Box(transform, "AirwayPylon" + p, new Vector3(px, y * 0.5f, z + 1.6f),
+                        new Vector3(0.28f, y, 0.28f), mid);
+                    pylon.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                    var lantern = PrimitiveMeshes.Box(transform, "AirwayLantern" + p, new Vector3(px, y + 0.9f, z),
+                        new Vector3(0.4f, 0.12f, 0.6f), p % 2 == 0 ? amber : magenta);
+                    lantern.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                }
+            }
+
+            BuildAirTraffic(rng, mid, cyan, magenta);
 
             // Ground haze panels under the towers.
             for (int i = 0; i < 9; i++)
@@ -307,6 +422,48 @@ namespace NeonVelocity.World
                 new Vector3(190f, 4f, 2f), mid).GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
             PrimitiveMeshes.Box(transform, "HorizonGlow", new Vector3(0f, 0.15f, -85f),
                 new Vector3(190f, 0.05f, 0.12f), cyan).GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+        }
+
+        private void BuildAirTraffic(DeterministicRandom rng, Material hull, Material cyan, Material magenta)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                var shuttle = new GameObject("Shuttle" + i);
+                shuttle.transform.SetParent(transform, false);
+                _trafficHeight.Add(rng.Range(13f, 34f));
+                _trafficDepth.Add(rng.Range(-62f, -16f));
+                _trafficPhase.Add(rng.Range(0f, Mathf.PI * 2f));
+                _trafficSpeed.Add(rng.Range(0.05f, 0.11f) * (rng.Chance(0.5f) ? 1f : -1f));
+                var wing = PrimitiveMeshes.Box(shuttle.transform, "Wing", Vector3.zero,
+                    new Vector3(2.5f, 0.18f, 0.7f), hull);
+                wing.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                var spine = PrimitiveMeshes.Box(shuttle.transform, "Spine", Vector3.zero,
+                    new Vector3(0.6f, 0.24f, 1.7f), hull);
+                spine.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                Material engineMaterial = i % 2 == 0 ? cyan : magenta;
+                var portGlow = PrimitiveMeshes.Box(shuttle.transform, "PortGlow", new Vector3(-1.05f, -0.02f, 0f),
+                    new Vector3(0.55f, 0.05f, 0.12f), engineMaterial);
+                portGlow.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                var starGlow = PrimitiveMeshes.Box(shuttle.transform, "StarGlow", new Vector3(1.05f, -0.02f, 0f),
+                    new Vector3(0.55f, 0.05f, 0.12f), engineMaterial);
+                starGlow.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
+                _traffic.Add(shuttle.transform);
+            }
+        }
+
+        private void UpdateTraffic(float unscaledTime)
+        {
+            for (int i = 0; i < _traffic.Count; i++)
+            {
+                var shuttle = _traffic[i];
+                if (shuttle == null) continue;
+                float wave = unscaledTime * _trafficSpeed[i] + _trafficPhase[i];
+                float x = Mathf.Sin(wave) * 62f;
+                float y = _trafficHeight[i] + Mathf.Sin(unscaledTime * 0.7f + i) * 0.7f;
+                shuttle.position = new Vector3(x, y, _trafficDepth[i]);
+                float heading = Mathf.Cos(wave) * Mathf.Sign(_trafficSpeed[i]);
+                shuttle.rotation = Quaternion.Euler(0f, heading > 0f ? -90f : 90f, 0f);
+            }
         }
 
         private void BuildHero(CharacterDefinition character, TrailDefinition trail)
@@ -414,12 +571,12 @@ namespace NeonVelocity.World
             _camera.farClipPlane = 620f;
             _camera.allowHDR = true;
             _camera.allowMSAA = true;
-            _camera.transform.position = new Vector3(2.7f, 2.35f, 6.15f);
-            _camera.transform.LookAt(new Vector3(0f, 1.45f, -4.5f));
+            _camera.transform.position = new Vector3(3.0f, 2.2f, 6.4f);
+            _camera.transform.LookAt(new Vector3(-2.1f, 1.32f, -4.8f));
             cameraGo.AddComponent<AudioListener>();
 
             var data = _camera.GetUniversalAdditionalCameraData();
-            data.renderPostProcessing = true;
+            data.renderPostProcessing = !VisualCaptureRunner.PostProcessingDisabled;
             data.antialiasing = AntialiasingMode.SubpixelMorphologicalAntiAliasing;
             data.antialiasingQuality = AntialiasingQuality.High;
             data.renderShadows = true;
@@ -451,8 +608,8 @@ namespace NeonVelocity.World
             {
                 var dof = profile.Add<DepthOfField>(true);
                 dof.mode.Override(DepthOfFieldMode.Bokeh);
-                dof.focusDistance.Override(8.2f);
-                dof.aperture.Override(6.3f);
+                dof.focusDistance.Override(7.4f);
+                dof.aperture.Override(5.6f);
                 dof.focalLength.Override(58f);
                 dof.bladeCount.Override(5);
                 dof.bladeCurvature.Override(1f);
@@ -480,16 +637,18 @@ namespace NeonVelocity.World
             {
                 _orbit += Time.unscaledDeltaTime * 0.075f;
                 float x = Mathf.Sin(_orbit) * 0.82f;
-                var target = new Vector3(x, 2.35f + Mathf.Sin(_time * 0.21f) * 0.1f, 6.15f);
+                var target = new Vector3(x + 0.35f, 2.2f + Mathf.Sin(_time * 0.21f) * 0.1f, 6.4f);
                 _camera.transform.position = Vector3.Lerp(_camera.transform.position, target, Time.unscaledDeltaTime * 1.1f);
-                _camera.transform.LookAt(new Vector3(0.25f, 1.45f, -4.5f));
+                _camera.transform.LookAt(new Vector3(-2.1f, 1.32f, -4.8f));
                 _camera.transform.rotation *= Quaternion.Euler(0f, 0f, Mathf.Sin(_time * 0.17f) * 0.45f);
             }
+            UpdateTraffic(_time);
             if (_cloudA != null) _cloudA.Rotate(0f, Time.unscaledDeltaTime * 0.5f, 0f, Space.Self);
             if (_cloudB != null) _cloudB.Rotate(0f, Time.unscaledDeltaTime * -0.3f, 0f, Space.Self);
             if (_runner != null)
                 _runner.Tick(Time.unscaledDeltaTime, 0.35f, Mathf.Sin(_time * 0.8f) * 0.4f, RunnerPose.Run);
             if (_ring != null) _ring.Rotate(0f, 0f, Time.unscaledDeltaTime * -3f);
+            if (_halo != null) _halo.Rotate(0f, Time.unscaledDeltaTime * 11f, 0f, Space.Self);
             for (int i = 0; i < _pulse.Count; i++)
             {
                 var renderer = _pulse[i];

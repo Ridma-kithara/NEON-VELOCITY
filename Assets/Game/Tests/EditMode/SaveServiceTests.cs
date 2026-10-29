@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using NeonVelocity.Core;
 using NeonVelocity.Persistence;
@@ -40,11 +41,12 @@ namespace NeonVelocity.Tests
             var first = new SaveService(_directory);
             first.Data.credits = 4321;
             first.Data.playerName = "TEST-RUNNER";
-            first.Data.xp = 1500;
+            first.Data.totalXp = 1500;
             first.Data.level = ProgressionMath.LevelFromXp(1500);
             first.Data.unlockedCharacters.Add("nova");
             first.Data.selectedCharacter = "nova";
             first.Data.settings.musicVolume = 0.25f;
+            first.Data.settings.masterVolume = 0.4f;
             first.Data.settings.graphicsPreset = 4;
             first.Data.settings.screenWidth = 3840;
             first.Data.settings.screenHeight = 2160;
@@ -55,17 +57,22 @@ namespace NeonVelocity.Tests
             first.Data.settings.antiAliasing = 8;
             first.Data.settings.effectsQuality = 1;
             first.Data.settings.viewDistance = 2;
+            first.Data.settings.timeOfDayMode = 1;
+            first.Data.settings.timeOfDayPhase = 4;
+            first.Data.settings.timeOfDayCycleMetres = 12_000f;
             first.Save();
 
             Assert.That(File.Exists(first.SavePath), Is.True);
             var second = new SaveService(_directory);
             Assert.AreEqual(4321, second.Data.credits);
             Assert.AreEqual("TEST-RUNNER", second.Data.playerName);
-            Assert.AreEqual(1500, second.Data.xp);
+            Assert.AreEqual(1500L, second.Data.totalXp);
+            Assert.AreEqual(0, second.Data.xp, "Legacy XP must be cleared once migrated to totalXp");
             Assert.AreEqual(ProgressionMath.LevelFromXp(1500), second.Data.level);
             Assert.AreEqual("nova", second.Data.selectedCharacter);
             Assert.That(second.Data.unlockedCharacters, Does.Contain("nova"));
             Assert.AreEqual(0.25f, second.Data.settings.musicVolume, 0.0001f);
+            Assert.AreEqual(0.4f, second.Data.settings.masterVolume, 0.0001f);
             Assert.AreEqual(4, second.Data.settings.graphicsPreset);
             Assert.AreEqual(3840, second.Data.settings.screenWidth);
             Assert.AreEqual(2160, second.Data.settings.screenHeight);
@@ -76,6 +83,38 @@ namespace NeonVelocity.Tests
             Assert.AreEqual(8, second.Data.settings.antiAliasing);
             Assert.AreEqual(1, second.Data.settings.effectsQuality);
             Assert.AreEqual(2, second.Data.settings.viewDistance);
+            Assert.AreEqual(1, second.Data.settings.timeOfDayMode);
+            Assert.AreEqual(4, second.Data.settings.timeOfDayPhase);
+            Assert.AreEqual(12_000f, second.Data.settings.timeOfDayCycleMetres, 0.001f);
+        }
+
+        [Test]
+        public void MigrationV4_RetiresOldLocationsAndClampsTimeOfDay()
+        {
+            var data = new SaveData
+            {
+                schemaVersion = 4,
+                furthestLocationIndex = 25,
+                discoveredLocations = new List<string> { LocationCatalog.Get(0).id, "retired-district" },
+                locationRecords = new List<LocationRecord>
+                {
+                    new LocationRecord { locationId = LocationCatalog.Get(0).id },
+                    new LocationRecord { locationId = "retired-district" }
+                }
+            };
+            data.settings.timeOfDayMode = 9;
+            data.settings.timeOfDayPhase = 99;
+            data.settings.timeOfDayCycleMetres = 0f;
+
+            SaveMigration.Normalise(data);
+
+            Assert.AreEqual(LocationCatalog.Get(0).id, data.discoveredLocations[0]);
+            Assert.AreEqual(1, data.discoveredLocations.Count);
+            Assert.AreEqual(1, data.locationRecords.Count);
+            Assert.AreEqual(LocationCatalog.Count - 1, data.furthestLocationIndex);
+            Assert.AreEqual(2, data.settings.timeOfDayMode);
+            Assert.AreEqual(TimeOfDayCatalog.Count - 1, data.settings.timeOfDayPhase);
+            Assert.AreEqual(TimeOfDayCatalog.DefaultCycleMetres, data.settings.timeOfDayCycleMetres, 0.001f);
         }
 
         [Test]
@@ -113,7 +152,7 @@ namespace NeonVelocity.Tests
             var source = new SaveService(_directory);
             source.Data.credits = 777;
             source.Data.playerName = "CLOUD-RUNNER";
-            source.Data.xp = 2000;
+            source.Data.totalXp = 2000;
             string json = source.ExportJson();
 
             string otherDirectory = Path.Combine(_directory, "cloud");
@@ -122,7 +161,59 @@ namespace NeonVelocity.Tests
             target.ImportCloudJson(json);
             Assert.AreEqual(777, target.Data.credits);
             Assert.AreEqual("CLOUD-RUNNER", target.Data.playerName);
-            Assert.AreEqual(2000, target.Data.xp);
+            Assert.AreEqual(2000L, target.Data.totalXp);
+        }
+
+        [Test]
+        public void LegacySave_MigratesXpOntoTheAuthoredCurve()
+        {
+            string path = Path.Combine(_directory, "neon_velocity_save.json");
+            File.WriteAllText(path,
+                "{\"schemaVersion\":3,\"xp\":1500,\"level\":5,\"credits\":50,\"playerName\":\"LEGACY\"}");
+
+            var service = new SaveService(_directory);
+            Assert.AreEqual(SaveData.CurrentSchemaVersion, service.Data.schemaVersion);
+            Assert.AreEqual(0, service.Data.xp, "Legacy XP must never be written back");
+            Assert.That(service.Data.totalXp, Is.GreaterThanOrEqualTo(ProgressionMath.TotalXpForLevel(5)));
+            Assert.AreEqual(ProgressionMath.LevelFromXp(service.Data.totalXp), service.Data.level);
+            Assert.That(service.Data.level, Is.GreaterThanOrEqualTo(5),
+                "Migration must preserve at least the player's saved level");
+        }
+
+        [Test]
+        public void Normalise_ClampsPremiumCacheAndDerivesLevel()
+        {
+            var data = new SaveData
+            {
+                schemaVersion = SaveData.CurrentSchemaVersion,
+                totalXp = 17_000L,
+                level = 1,
+                credits = -25,
+                discoveredLocations = null,
+                locationRecords = null,
+                premium = new PremiumCache
+                {
+                    gems = -40,
+                    pendingOrders = -2,
+                    deviceKey = "  ",
+                    ownedItems = null,
+                    characters = null,
+                    upgrades = null
+                }
+            };
+
+            SaveMigration.Normalise(data);
+
+            Assert.AreEqual(10, data.level, "Level must be derived from total XP, not trusted from disk");
+            Assert.AreEqual(0, data.credits);
+            Assert.IsNotNull(data.discoveredLocations);
+            Assert.IsNotNull(data.locationRecords);
+            Assert.IsNotNull(data.premium.ownedItems);
+            Assert.IsNotNull(data.premium.characters);
+            Assert.IsNotNull(data.premium.upgrades);
+            Assert.AreEqual(0, data.premium.gems);
+            Assert.AreEqual(0, data.premium.pendingOrders);
+            Assert.AreEqual("", data.premium.deviceKey);
         }
     }
 }

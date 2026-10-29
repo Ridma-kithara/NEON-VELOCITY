@@ -242,10 +242,12 @@ namespace NeonVelocity.UI
         private void UnlockCharacter(string id)
         {
             bool ok = _app.Progression.UnlockCharacter(id, out string message);
+            _app.Audio.PlaySfx(ok ? "sfx_purchase" : "sfx_hit", ok ? 0.9f : 0.4f);
             _app.UI.Toast(message, ok ? UITheme.Lime : UITheme.Red, 2.5f);
             if (ok)
             {
                 _app.Progression.SelectCharacter(id);
+                _app.Audio.PlaySfx("sfx_select", 0.8f);
                 _app.SaveProfile();
             }
             Reload();
@@ -316,9 +318,11 @@ namespace NeonVelocity.UI
         private void UnlockTrail(string id)
         {
             bool ok = _app.Progression.UnlockTrail(id, out string message);
+            _app.Audio.PlaySfx(ok ? "sfx_purchase" : "sfx_hit", ok ? 0.9f : 0.4f);
             _app.UI.Toast(message, ok ? UITheme.Lime : UITheme.Red, 2.5f);
             if (!ok) { Reload(); return; }
             _app.Progression.SelectTrail(id);
+            _app.Audio.PlaySfx("sfx_select", 0.8f);
             _app.SaveProfile();
             Reload();
         }
@@ -387,6 +391,7 @@ namespace NeonVelocity.UI
         private void BuyUpgrade(string id)
         {
             bool ok = _app.Progression.BuyUpgrade(id, out string message);
+            _app.Audio.PlaySfx(ok ? "sfx_upgrade" : "sfx_hit", ok ? 0.9f : 0.4f);
             _app.UI.Toast(message, ok ? UITheme.Lime : UITheme.Red, 2.5f);
             Reload();
         }

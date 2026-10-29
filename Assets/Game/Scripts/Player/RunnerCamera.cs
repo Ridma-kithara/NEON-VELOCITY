@@ -30,6 +30,9 @@ namespace NeonVelocity.Player
         private ChromaticAberration _chroma;
         private MotionBlur _motionBlur;
         private FilmGrain _filmGrain;
+        private WhiteBalance _whiteBalance;
+        private LensDistortion _lens;
+        private PaniniProjection _panini;
 
         public static RunnerCamera Create(Transform parent, RunnerController runner, bool reducedMotion, bool shakeEnabled,
             float graphicsScale)
@@ -61,7 +64,7 @@ namespace NeonVelocity.Player
             gameObject.transform.position = new Vector3(0f, 3.8f, -7.2f);
 
             var data = Camera.GetUniversalAdditionalCameraData();
-            data.renderPostProcessing = true;
+            data.renderPostProcessing = !VisualCaptureRunner.PostProcessingDisabled;
             data.antialiasing = graphicsScale >= 2f
                 ? AntialiasingMode.SubpixelMorphologicalAntiAliasing
                 : (graphicsScale >= 1f ? AntialiasingMode.FastApproximateAntialiasing : AntialiasingMode.None);
@@ -98,6 +101,22 @@ namespace NeonVelocity.Player
             _motionBlur.quality.Override(MotionBlurQuality.Medium);
             _motionBlur.intensity.Override(reducedMotion || graphicsScale < 2f ? 0f : 0.16f);
             _motionBlur.clamp.Override(0.045f);
+            // A subtle cool white balance keys the night city as "electronic" while keeping
+            // skin of the emissive signage warm where it matters.
+            _whiteBalance = profile.Add<WhiteBalance>(true);
+            _whiteBalance.temperature.Override(-9f);
+            _whiteBalance.tint.Override(1.5f);
+            _lens = profile.Add<LensDistortion>(true);
+            _lens.intensity.Override(reducedMotion ? 0f : 0.08f);
+            _lens.xMultiplier.Override(1f);
+            _lens.yMultiplier.Override(1f);
+            _lens.center.Override(new Vector2(0.5f, 0.5f));
+            _lens.scale.Override(1f);
+            // Panini keeps the towering skyline from bending crazily at wide FOV — the
+            // straight verticals of the towers stay legible during nausea-free high speed.
+            _panini = profile.Add<PaniniProjection>(true);
+            _panini.distance.Override(reducedMotion ? 0f : 0.14f);
+            if (graphicsScale >= 2f) _panini.distance.Override(0.18f);
             var volumeGo = new GameObject("Gameplay Volume");
             volumeGo.transform.SetParent(transform, false);
             Volume = volumeGo.AddComponent<Volume>();
@@ -136,6 +155,10 @@ namespace NeonVelocity.Player
             if (_chroma != null)
                 _chroma.intensity.Override(_reducedMotion ? 0.025f
                     : (settings.effectsQuality >= 2 ? 0.075f : 0.04f));
+            if (_lens != null) _lens.intensity.Override(_reducedMotion ? 0f
+                : (settings.effectsQuality >= 2 ? 0.08f : 0.05f));
+            if (_panini != null) _panini.distance.Override(_reducedMotion ? 0f
+                : (settings.effectsQuality >= 2 ? 0.18f : 0.12f));
         }
 
         public void SetTarget(Transform target) => _target = target;
@@ -186,6 +209,7 @@ namespace NeonVelocity.Player
             Vector3 lookAt = new Vector3(runnerPos.x * 0.24f, runnerPos.y + 1.36f, z + 17f + speedNorm * 6f);
             Quaternion rotation = Quaternion.LookRotation(lookAt - transform.position, Vector3.up);
             float roll = _reducedMotion ? 0f : Mathf.Clamp((runnerPos.x - x) * -2.1f, -2.8f, 2.8f);
+            roll += _reducedMotion ? 0f : _runner.JunctionLean * 3.2f;
             rotation *= Quaternion.Euler(0f, 0f, roll);
             transform.rotation = Quaternion.Slerp(transform.rotation, rotation, 1f - Mathf.Exp(-dt * 6f));
 

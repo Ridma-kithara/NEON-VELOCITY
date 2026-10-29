@@ -73,11 +73,15 @@ namespace NeonVelocity.Audio
         {
             string[] names =
             {
-                "music_menu", "music_run", "ambience_city", "ambience_skyway", "ambience_reactor",
-                "ambience_tunnel", "ambience_rain", "sfx_jump", "sfx_land", "sfx_slide", "sfx_coin",
+                "music_menu", "music_run", "music_run_alt", "ambience_city", "ambience_skyway",
+                "ambience_reactor", "ambience_tunnel", "ambience_rain", "ambience_snow",
+                "ambience_forest", "ambience_coast", "ambience_volcanic", "sfx_jump", "sfx_land",
+                "sfx_slide", "sfx_coin",
                 "sfx_shard", "sfx_hit", "sfx_powerup", "sfx_click", "sfx_countdown", "sfx_go",
                 "sfx_victory", "sfx_defeat", "sfx_nearmiss", "sfx_daily", "sfx_step_wet_1",
-                "sfx_step_wet_2", "sfx_step_metal", "sfx_lane", "sfx_thunder", "sfx_train_pass"
+                "sfx_step_wet_2", "sfx_step_metal", "sfx_lane", "sfx_thunder", "sfx_train_pass",
+                "sfx_revive", "sfx_levelup", "sfx_location", "sfx_purchase", "sfx_select",
+                "sfx_upgrade", "sfx_ability"
             };
             foreach (string name in names)
             {
@@ -114,6 +118,18 @@ namespace NeonVelocity.Audio
                 "sfx_lane" => 420f,
                 "sfx_thunder" => 72f,
                 "sfx_train_pass" => 105f,
+                "sfx_revive" => 620f,
+                "sfx_levelup" => 980f,
+                "sfx_location" => 740f,
+                "sfx_purchase" => 1180f,
+                "sfx_select" => 660f,
+                "sfx_upgrade" => 840f,
+                "sfx_ability" => 1320f,
+                "music_run_alt" => 174f,
+                "ambience_snow" => 440f,
+                "ambience_forest" => 700f,
+                "ambience_coast" => 260f,
+                "ambience_volcanic" => 60f,
                 _ => 320f
             };
             for (int i = 0; i < samples; i++)
@@ -132,8 +148,9 @@ namespace NeonVelocity.Audio
         public void ApplyVolumes()
         {
             if (_settings == null) return;
-            if (_music != null) _music.Source.volume = _settings.musicVolume * _music.TargetVolume;
-            if (_ambience != null) _ambience.Source.volume = _settings.ambienceVolume * _ambience.TargetVolume;
+            float master = _settings.masterVolume;
+            if (_music != null) _music.Source.volume = master * _settings.musicVolume * _music.TargetVolume;
+            if (_ambience != null) _ambience.Source.volume = master * _settings.ambienceVolume * _ambience.TargetVolume;
         }
 
         public void SetSettings(SettingsData settings)
@@ -152,7 +169,7 @@ namespace NeonVelocity.Audio
             _music.Source.clip = clip;
             _music.Source.loop = true;
             _music.Source.Play();
-            _musicFade = StartCoroutine(FadeBus(_music, volume * _settings.musicVolume, fadeSeconds));
+            _musicFade = StartCoroutine(FadeBus(_music, volume * _settings.masterVolume * _settings.musicVolume, fadeSeconds));
         }
 
         public void PlayAmbience(string clipName, float volume = 0.5f, float fadeSeconds = 1.5f)
@@ -165,7 +182,7 @@ namespace NeonVelocity.Audio
             _ambience.Source.clip = clip;
             _ambience.Source.loop = true;
             _ambience.Source.Play();
-            _ambienceFade = StartCoroutine(FadeBus(_ambience, volume * _settings.ambienceVolume, fadeSeconds));
+            _ambienceFade = StartCoroutine(FadeBus(_ambience, volume * _settings.masterVolume * _settings.ambienceVolume, fadeSeconds));
         }
 
         public void StopMusic(float fadeSeconds = 0.8f)
@@ -200,7 +217,7 @@ namespace NeonVelocity.Audio
             _lastPlayed[clipName] = now;
             var source = _sfxPool[_nextSfx++ % _sfxPool.Count];
             source.pitch = Random.Range(0.97f, 1.03f);
-            source.PlayOneShot(clip, Mathf.Clamp01(_settings.sfxVolume * volumeScale));
+            source.PlayOneShot(clip, Mathf.Clamp01(_settings.masterVolume * _settings.sfxVolume * volumeScale));
         }
 
         /// <summary>
@@ -217,7 +234,7 @@ namespace NeonVelocity.Audio
             source.minDistance = Mathf.Max(0.5f, minDistance);
             source.maxDistance = Mathf.Max(source.minDistance, maxDistance);
             source.pitch = Random.Range(0.96f, 1.04f);
-            source.PlayOneShot(clip, Mathf.Clamp01(_settings.sfxVolume * volumeScale));
+            source.PlayOneShot(clip, Mathf.Clamp01(_settings.masterVolume * _settings.sfxVolume * volumeScale));
         }
 
         public void PlayFootstep(bool metal, float volumeScale = 0.34f, int stepIndex = 0)
@@ -230,6 +247,12 @@ namespace NeonVelocity.Audio
 
         public void PlayUiClick() => PlaySfx("sfx_click", 0.55f, 0.03f);
         public void PlayCountdown(bool go) => PlaySfx(go ? "sfx_go" : "sfx_countdown", 0.8f, 0f);
+
+        public void SetMasterVolume(float value)
+        {
+            _settings.masterVolume = Mathf.Clamp01(value);
+            ApplyVolumes();
+        }
 
         public void SetMusicVolume(float value)
         {
@@ -246,7 +269,7 @@ namespace NeonVelocity.Audio
 
         public void PauseForMenu()
         {
-            if (_music != null) _music.Source.volume = _settings.musicVolume * _music.TargetVolume * 0.55f;
+            if (_music != null) _music.Source.volume = _settings.masterVolume * _settings.musicVolume * _music.TargetVolume * 0.55f;
         }
 
         public void ResumeFromMenu() => ApplyVolumes();

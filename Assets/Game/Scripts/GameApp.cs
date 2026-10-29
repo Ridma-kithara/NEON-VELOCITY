@@ -4,8 +4,10 @@ using System.Collections.Generic;
 using System.Globalization;
 using NeonVelocity.Audio;
 using NeonVelocity.Core;
+using NeonVelocity.Account;
 using NeonVelocity.Multiplayer;
 using NeonVelocity.Persistence;
+using NeonVelocity.Premium;
 using NeonVelocity.Progression;
 using NeonVelocity.UI;
 using NeonVelocity.Utilities;
@@ -33,7 +35,14 @@ namespace NeonVelocity
             Leaderboard,
             Settings,
             Pause,
-            Results
+            Results,
+            Character,
+            GemShop,
+            Upgrades,
+            Account,
+            Events,
+            Discovery,
+            Achievements
         }
 
         public static GameApp Instance { get; private set; }
@@ -44,6 +53,8 @@ namespace NeonVelocity
         public AudioManager Audio { get; private set; }
         public UIRoot UI { get; private set; }
         public RaceClient Race { get; private set; }
+        public PremiumService Premium { get; private set; }
+        public AccountService Account { get; private set; }
         public MenuStage MenuStage { get; private set; }
         public GameSession Session { get; private set; }
         public SaveData Profile => SaveService != null ? SaveService.Data : null;
@@ -56,6 +67,8 @@ namespace NeonVelocity
         private readonly List<AppScreen> _navigation = new List<AppScreen>();
         private AppScreen _currentScreen = AppScreen.MainMenu;
         private bool _settingsReturnToRun;
+        private int _accountTab;
+        private RunResult _lastResult;
 
         public bool CanNavigateBack => _navigation.Count > 0;
         public string CurrentScreenName => _currentScreen.ToString();
@@ -97,6 +110,16 @@ namespace NeonVelocity
             Race = gameObject.AddComponent<RaceClient>();
             Race.SetPlayerName(Profile.playerName);
 
+            var premiumGo = new GameObject("Premium Store");
+            premiumGo.transform.SetParent(_servicesRoot.transform, false);
+            Premium = premiumGo.AddComponent<PremiumService>();
+            Premium.Initialise(this);
+
+            var accountGo = new GameObject("Account");
+            accountGo.transform.SetParent(_servicesRoot.transform, false);
+            Account = accountGo.AddComponent<AccountService>();
+            Account.Initialise(this, Premium);
+
             ApplySettings(false);
 
             var uiGo = new GameObject("Interface");
@@ -126,6 +149,14 @@ namespace NeonVelocity
             {
                 Profile.hasSeenWelcome = true;
                 SaveService.Save();
+            }
+            // Premium balance, catalog and ownership are mirrored from the authority. A missing
+            // service leaves the cached wallet visible but never fabricates a purchase.
+            if (Premium != null) Premium.SyncAll();
+            if (Account != null)
+            {
+                Account.RefreshPaymentCapabilities();
+                if (Account.SignedIn) Account.SyncNow(null);
             }
         }
 
@@ -219,6 +250,49 @@ namespace NeonVelocity
             OpenScreen(AppScreen.Leaderboard);
         }
 
+        public void ShowCharacter()
+        {
+            Audio.PlayUiClick();
+            OpenScreen(AppScreen.Character);
+        }
+
+        public void ShowGemShop()
+        {
+            Audio.PlayUiClick();
+            OpenScreen(AppScreen.GemShop);
+        }
+
+        public void ShowUpgrades()
+        {
+            Audio.PlayUiClick();
+            OpenScreen(AppScreen.Upgrades);
+        }
+
+        public void ShowAccount(int tab = 0)
+        {
+            Audio.PlayUiClick();
+            _accountTab = Mathf.Clamp(tab, 0, 3);
+            OpenScreen(AppScreen.Account);
+        }
+
+        public void ShowEvents()
+        {
+            Audio.PlayUiClick();
+            OpenScreen(AppScreen.Events);
+        }
+
+        public void ShowDiscovery()
+        {
+            Audio.PlayUiClick();
+            OpenScreen(AppScreen.Discovery);
+        }
+
+        public void ShowAchievements()
+        {
+            Audio.PlayUiClick();
+            OpenScreen(AppScreen.Achievements);
+        }
+
         public void ShowSettings(bool returnToRun)
         {
             Audio.PlayUiClick();
@@ -233,6 +307,11 @@ namespace NeonVelocity
             _navigation.Clear();
             _currentScreen = AppScreen.Pause;
             Session.SetPaused(true);
+            // The HUD canvas sits above the screen canvas. Leaving its toasts and banners
+            // alive while paused lets them draw over the pause panel at shorter aspect
+            // ratios, so hide the HUD and clear in-flight toasts until the run resumes.
+            UI.SetHudVisible(false);
+            UI.ClearToasts();
             UI.ShowScreen(PauseScreen.Build(this, UI));
         }
 
@@ -240,6 +319,7 @@ namespace NeonVelocity
         {
             UI.CloseScreen();
             if (Session != null) Session.SetPaused(false);
+            UI.SetHudVisible(true);
             _navigation.Clear();
             _settingsReturnToRun = false;
             _currentScreen = AppScreen.MainMenu;
@@ -247,13 +327,76 @@ namespace NeonVelocity
 
         public void ShowResults(RunResult result)
         {
+            _lastResult = result;
+            _navigation.Clear();
+            ShowResultsScreen();
+        }
+
+        private void ShowResultsScreen()
+        {
+            if (_lastResult == null)
+            {
+                ShowMainMenu();
+                return;
+            }
             UI.HideHud();
             UI.CloseScreen();
-            _navigation.Clear();
             _currentScreen = AppScreen.Results;
-            var screen = ResultsScreen.Build(this, UI, result);
-            UI.ShowScreen(screen);
+            UI.ShowScreen(ResultsScreen.Build(this, UI, _lastResult));
             Audio.PlayMusic("music_menu", 0.4f);
+        }
+
+        /// <summary>
+        /// Leaves the results screen for the title. Any crashed run that is still awaiting a
+        /// revive is finalized exactly once here, so its rewards are never lost or duplicated.
+        /// </summary>
+        public void LeaveResultsToMenu()
+        {
+            Audio.PlayUiClick();
+            if (Session != null && Session.IsAwaitingRevive) Session.FinalizePendingRun();
+            _lastResult = null;
+            ShowMainMenu();
+        }
+
+        /// <summary>Finalizes the pending run once, then starts a fresh run of the same mode.</summary>
+        public void RestartFromResults()
+        {
+            Audio.PlayUiClick();
+            if (Session == null)
+            {
+                ShowMainMenu();
+                return;
+            }
+            var spec = Session.Mode;
+            bool online = Session.Online != null;
+            if (Session.IsAwaitingRevive) Session.FinalizePendingRun();
+            if (online)
+            {
+                ShowMultiplayer();
+                return;
+            }
+            StartSession(spec, BuildOfflineSeed(spec), null);
+        }
+
+        /// <summary>
+        /// Opens the GEM shop above a crashed run without ending it, so BUY GEMS can return to
+        /// the results offer and revive at the exact death position after the wallet is topped up.
+        /// </summary>
+        public void ShowGemShopFromResults()
+        {
+            if (UI == null || _transitioning) return;
+            Audio.PlayUiClick();
+            if (_currentScreen != AppScreen.GemShop) _navigation.Add(AppScreen.Results);
+            _currentScreen = AppScreen.GemShop;
+            UI.ShowScreen(GemShopScreen.Build(this, UI));
+        }
+
+        /// <summary>Finalizes any held crashed run, then opens the mode picker from results.</summary>
+        public void ChooseModeFromResults()
+        {
+            Audio.PlayUiClick();
+            if (Session != null && Session.IsAwaitingRevive) Session.FinalizePendingRun();
+            ShowModes();
         }
 
         /// <summary>
@@ -353,6 +496,27 @@ namespace NeonVelocity
                 case AppScreen.Leaderboard:
                     UI.ShowScreen(LeaderboardScreen.Build(this, UI));
                     break;
+                case AppScreen.Character:
+                    UI.ShowScreen(CharacterScreen.Build(this, UI));
+                    break;
+                case AppScreen.GemShop:
+                    UI.ShowScreen(GemShopScreen.Build(this, UI));
+                    break;
+                case AppScreen.Upgrades:
+                    UI.ShowScreen(UpgradeScreen.Build(this, UI));
+                    break;
+                case AppScreen.Account:
+                    UI.ShowScreen(AccountScreen.Build(this, UI, _accountTab));
+                    break;
+                case AppScreen.Events:
+                    UI.ShowScreen(EventsScreen.Build(this, UI));
+                    break;
+                case AppScreen.Discovery:
+                    UI.ShowScreen(DiscoveryScreen.Build(this, UI));
+                    break;
+                case AppScreen.Achievements:
+                    UI.ShowScreen(AchievementsScreen.Build(this, UI));
+                    break;
                 case AppScreen.Settings:
                     UI.ShowScreen(SettingsScreen.Build(this, UI, _settingsReturnToRun));
                     break;
@@ -362,7 +526,7 @@ namespace NeonVelocity
                     UI.ShowScreen(PauseScreen.Build(this, UI));
                     break;
                 case AppScreen.Results:
-                    ShowMainMenu();
+                    ShowResultsScreen();
                     break;
                 default:
                     ShowMainMenu();
@@ -381,6 +545,7 @@ namespace NeonVelocity
 
         private void QuitNow()
         {
+            if (Session != null && Session.IsAwaitingRevive) Session.FinalizePendingRun();
 #if UNITY_EDITOR
             Debug.Log("[NEON VELOCITY] Quit requested (ignored in editor).");
 #else
@@ -400,6 +565,25 @@ namespace NeonVelocity
             }
             int seed = BuildOfflineSeed(spec);
             StartSession(spec, seed, null);
+        }
+
+        /// <summary>
+        /// Closes the results card and resumes the crashed session at the exact metre, lane and
+        /// pose where it died. The GEMS debit has already been confirmed by the authority.
+        /// </summary>
+        public bool RevivePendingRun()
+        {
+            if (Session == null || !Session.IsAwaitingRevive) return false;
+            if (!Session.ReviveAtExactPosition()) return false;
+            _lastResult = null;
+            _navigation.Clear();
+            _currentScreen = AppScreen.MainMenu;
+            UI.CloseScreen();
+            UI.CloseModal();
+            UI.ShowHud();
+            Session.AttachHud(UI.Hud);
+            Audio.PlayMusic("music_run", 0.55f);
+            return true;
         }
 
         public void StartOnlineSession(ModeSpec spec, int seed, long startAtMs, float durationSeconds,
@@ -440,18 +624,25 @@ namespace NeonVelocity
             return seed == 0 ? 1 : Mathf.Abs(seed);
         }
 
-        public void StartSession(ModeSpec spec, int seed, OnlineRaceContext online)
+        public void StartSession(ModeSpec spec, int seed, OnlineRaceContext online, float reviveHeadStart = -1f)
         {
             if (_transitioning) return;
             _transitioning = true;
             StopAllCoroutines();
-            StartCoroutine(StartSessionRoutine(spec, seed, online));
+            StartCoroutine(StartSessionRoutine(spec, seed, online, reviveHeadStart));
         }
 
-        private IEnumerator StartSessionRoutine(ModeSpec spec, int seed, OnlineRaceContext online)
+        private IEnumerator StartSessionRoutine(ModeSpec spec, int seed, OnlineRaceContext online,
+            float reviveHeadStart = -1f)
         {
+            if (Session != null && Session.IsAwaitingRevive) Session.FinalizePendingRun();
             UI.FadeOut(0.2f);
             yield return new WaitForSecondsRealtime(0.2f);
+            // A cinematic loading card gives the run an authored start instead of a raw cut.
+            UI.ShowLoading(spec.Title, spec.Objective);
+            if (online == null) Profile.lastModeId = spec.Id.ToString();
+            SaveService.Save();
+            yield return new WaitForSecondsRealtime(0.65f);
             UI.CloseScreen();
             UI.CloseModal();
             UI.HideHud();
@@ -464,7 +655,8 @@ namespace NeonVelocity
             var sessionGo = new GameObject("Run - " + spec.Title);
             sessionGo.transform.SetParent(transform, false);
             Session = sessionGo.AddComponent<GameSession>();
-            Session.Begin(this, spec, seed, online);
+            Session.Begin(this, spec, seed, online, reviveHeadStart);
+            UI.HideLoading();
             UI.ShowHud();
             Session.AttachHud(UI.Hud);
             UI.FadeIn(0.22f);
@@ -478,6 +670,7 @@ namespace NeonVelocity
             if (Session == null) return;
             var spec = Session.Mode;
             bool online = Session.Online != null;
+            if (Session.IsAwaitingRevive) Session.FinalizePendingRun();
             if (online)
             {
                 ShowMainMenu();
@@ -494,6 +687,7 @@ namespace NeonVelocity
             if (Session != null)
             {
                 var session = Session;
+                if (session.IsAwaitingRevive) session.FinalizePendingRun();
                 Session = null;
                 session.DisposeSession();
             }
@@ -554,6 +748,7 @@ namespace NeonVelocity
                 CreateMenuStage();
             }
             Session?.ApplyVideoSettings();
+            Premium?.Reconfigure();
             if (save)
             {
                 SaveService.Save();
@@ -680,6 +875,7 @@ namespace NeonVelocity
 
         private void OnApplicationQuit()
         {
+            if (Session != null && Session.IsAwaitingRevive) Session.FinalizePendingRun();
             SaveService?.Save();
         }
     }

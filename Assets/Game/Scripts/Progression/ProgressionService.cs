@@ -26,6 +26,7 @@ namespace NeonVelocity.Progression
         public int ServerCredits;
         public int ServerXp;
         public string ServerRaceId;
+        public int NewLocations;
     }
 
     public sealed class ProgressionService
@@ -113,8 +114,7 @@ namespace NeonVelocity.Progression
             {
                 Data.credits += credits;
                 Data.totalCoins += Mathf.Max(0, run.Coins);
-                Data.xp += xp;
-                Data.level = ProgressionMath.LevelFromXp(Data.xp);
+                GrantXp(xp, rewards.Messages);
                 Data.seasonXp += xp;
                 Data.seasonLevel = ProgressionMath.SeasonLevel(Data.seasonXp);
 
@@ -218,6 +218,119 @@ namespace NeonVelocity.Progression
             return rewards;
         }
 
+        /// <summary>
+        /// Applies XP to the authoritative total and returns how many levels were crossed.
+        /// Milestone rewards are recorded by level key, so re-applying or receiving a large
+        /// XP grant can never pay the same milestone twice.
+        /// </summary>
+        public int GrantXp(long amount, List<string> messages)
+        {
+            int beforeLevel = Data.level;
+            if (amount > 0L)
+            {
+                LevelProgression.AddXp(ref Data.totalXp, amount, out int newLevel);
+                Data.level = newLevel;
+            }
+            else
+            {
+                Data.totalXp = LevelProgression.SanitiseXp(Data.totalXp);
+                Data.level = LevelProgression.LevelForXp(Data.totalXp);
+            }
+
+            int gained = Math.Max(0, Data.level - beforeLevel);
+            if (gained <= 0) return 0;
+            Data.lifetime.levelsGained += gained;
+            int first = beforeLevel + 1;
+            int last = Math.Min(Data.level, first + 999);
+            for (int level = first; level <= last; level++)
+            {
+                if (!LevelProgression.IsMilestone(level)) continue;
+                string key = "milestone:" + level;
+                if (Data.IsRedeemed(key)) continue;
+                var reward = LevelProgression.MilestoneFor(level);
+                if (!reward.IsValid) continue;
+                Data.MarkRedeemed(key);
+                Data.credits += reward.Credits;
+                messages?.Add("LEVEL " + level + " MILESTONE  +" + reward.Credits + " CREDITS");
+                if (!string.IsNullOrEmpty(reward.UnlockId))
+                    Data.MarkRedeemed("unlock:" + reward.UnlockId);
+            }
+            return gained;
+        }
+
+        /// <summary>
+        /// Computes run rewards without mutating the profile. The results screen shows this
+        /// preview while a crashed session is still alive for a possible exact revive.
+        /// </summary>
+        public RunRewards PreviewRun(RunSummary run)
+        {
+            var rewards = new RunRewards { Messages = new List<string>() };
+            var spec = GameModes.Get(run.ModeId);
+            if (run.OnlineResult && !string.IsNullOrEmpty(run.ServerRaceId) &&
+                Data.IsRedeemed("race:" + run.ServerRaceId))
+            {
+                rewards.Verified = true;
+                rewards.Messages.Add("RESULT ALREADY VERIFIED");
+                return rewards;
+            }
+
+            int credits = 0;
+            int xp = 0;
+            if (run.OnlineResult)
+            {
+                credits = Mathf.Max(0, run.ServerCredits);
+                xp = Mathf.Max(0, run.ServerXp);
+                rewards.Verified = true;
+            }
+            else if (spec.CountsProgression)
+            {
+                credits = ProgressionMath.CreditsForRun(run.Coins, run.Distance, spec.CoinMultiplier);
+                credits += Mathf.Max(0, run.NearMissCredits);
+                xp = ProgressionMath.XpForRun(run.Distance, run.Score, run.Coins,
+                    run.ModeId == GameModeId.SeasonalEvent ? 2f : 1f);
+            }
+            rewards.Credits = credits;
+            rewards.Xp = xp;
+            if (xp > 0)
+            {
+                long projected = Math.Min(LevelProgression.MaxTotalXp, Data.totalXp + xp);
+                int projectedLevel = LevelProgression.LevelForXp(projected);
+                if (projectedLevel > Data.level)
+                    rewards.Messages.Add("LEVEL UP PREVIEW  \u25B8  RUNNER LV " + projectedLevel);
+            }
+            if (!spec.CountsProgression)
+                rewards.Messages.Add("PRACTICE MODE - NO COMPETITIVE REWARDS");
+            return rewards;
+        }
+
+        public void RegisterLocationDiscovery(int zoneIndex, float distance, out bool firstDiscovery)
+        {
+            var location = LocationCatalog.Get(zoneIndex);
+            firstDiscovery = !Data.HasDiscoveredLocation(location.id);
+            Data.furthestLocationIndex = Math.Max(Data.furthestLocationIndex, zoneIndex);
+            if (firstDiscovery)
+            {
+                Data.discoveredLocations.Add(location.id);
+                Data.lifetime.locationsDiscovered = Data.discoveredLocations.Count;
+            }
+            var record = Data.FindLocationRecord(location.id);
+            if (record == null)
+            {
+                record = new LocationRecord
+                {
+                    locationId = location.id,
+                    zoneIndex = zoneIndex,
+                    firstSeenUtc = DateTime.UtcNow.ToString("O")
+                };
+                Data.locationRecords.Add(record);
+            }
+            record.visits++;
+            record.bestDistance = Mathf.Max(record.bestDistance, distance);
+            record.lastSeenUtc = DateTime.UtcNow.ToString("O");
+            _save.Save();
+            ProgressChanged?.Invoke();
+        }
+
         private void ApplyMissions(RunSummary run)
         {
             var missions = Data.missions.missions;
@@ -237,6 +350,7 @@ namespace NeonVelocity.Progression
                     case MissionMetric.Races: delta = run.OnlineResult ? 1 : 0; break;
                     case MissionMetric.Score: delta = Mathf.Max(0, run.Score); break;
                     case MissionMetric.NearMisses: delta = Mathf.Max(0, run.NearMisses); break;
+                    case MissionMetric.Locations: delta = Mathf.Max(0, run.NewLocations); break;
                 }
                 if (delta <= 0) continue;
                 if ((MissionMetric)m.metric == MissionMetric.Score)
@@ -283,8 +397,7 @@ namespace NeonVelocity.Progression
             if (mission == null || mission.claimed || mission.progress < mission.target) return false;
             mission.claimed = true;
             Data.credits += mission.rewardCredits;
-            Data.xp += mission.rewardXp;
-            Data.level = ProgressionMath.LevelFromXp(Data.xp);
+            GrantXp(Mathf.Max(0, mission.rewardXp), null);
             Data.lifetime.missionsClaimed++;
             _save.Save();
             ProgressChanged?.Invoke();
@@ -390,12 +503,23 @@ namespace NeonVelocity.Progression
             Debug.Log($"[Progression] +{amount} credits ({reason})");
         }
 
+        /// <summary>Deducts gems for a service purchase (e.g. run revive). Returns the balance after.</summary>
+        public bool SpendCredits(int amount, string reason)
+        {
+            if (amount <= 0) return true;
+            if (Data.credits < amount) return false;
+            Data.credits -= amount;
+            _save.Save();
+            ProgressChanged?.Invoke();
+            Debug.Log($"[Progression] -{amount} credits ({reason})");
+            return true;
+        }
+
         public void RecordVerifiedRace(int credits, int xp, string raceId)
         {
             if (!string.IsNullOrEmpty(raceId)) Data.MarkRedeemed("race:" + raceId);
             AddCredits(credits, "verified race " + raceId);
-            Data.xp += Mathf.Max(0, xp);
-            Data.level = ProgressionMath.LevelFromXp(Data.xp);
+            GrantXp(Mathf.Max(0, xp), null);
             _save.Save();
             ProgressChanged?.Invoke();
         }

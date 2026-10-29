@@ -28,9 +28,11 @@ namespace NeonVelocity.UI
             UITheme.Stretch((RectTransform)dim.transform);
 
             var session = _app.Session;
-            var panel = ScreenKit.Card(root, "Panel", new Color(0.025f, 0.05f, 0.09f, 0.98f));
-            UITheme.Anchor((RectTransform)panel.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(-360f, -330f), new Vector2(360f, 330f));
+            var border = UITheme.GlassCard(root, "Panel", new Color(0.025f, 0.05f, 0.09f, 0.98f), 0.5f);
+            var panel = border.transform.parent as RectTransform;
+            border.color = UITheme.Cyan.Alpha(0.55f);
+            UITheme.Anchor(panel, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-380f, -330f), new Vector2(380f, 330f));
             var accent = UITheme.Img(panel.transform, "Accent", UITheme.Cyan);
             UITheme.Anchor((RectTransform)accent.transform, new Vector2(0f, 0f), new Vector2(0f, 1f),
                 new Vector2(0f, 24f), new Vector2(5f, -24f));
@@ -51,7 +53,7 @@ namespace NeonVelocity.UI
                     ? "DISTANCE  " + UITheme.FormatDistance(session.Distance) + "\n" +
                       "SCORE  " + UITheme.FormatNumber(session.Score) + "\n" +
                       "TIME  " + UITheme.FormatTime(session.RaceElapsed) + "\n" +
-                      "ENERGY  " + session.Coins
+                      "CREDITS  " + session.Coins
                     : "",
                 UITheme.BodySize, UITheme.White, TextAnchor.UpperLeft);
             UITheme.Anchor((RectTransform)stats.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
@@ -86,6 +88,8 @@ namespace NeonVelocity.UI
             var abandon = UITheme.Button(list, "Abandon", "ABANDON RUN", UITheme.Red,
                 ConfirmAbandon);
             UITheme.Layout(abandon.gameObject, 62f, -1f, 62f);
+            UiFx.Hover(abandon.gameObject, 1.03f);
+            UiFx.Hover(resume.gameObject, 1.03f);
         }
 
         private void ConfirmAbandon()

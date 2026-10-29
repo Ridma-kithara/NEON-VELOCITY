@@ -104,7 +104,7 @@ def validate_branding() -> None:
 
 def validate_audio() -> None:
     clips = sorted(AUDIO_DIR.glob("*.wav"))
-    check(len(clips) == 27, f"expected 27 audio clips, found {len(clips)}")
+    check(len(clips) == 32, f"expected 32 audio clips, found {len(clips)}")
     total_seconds = 0.0
     for clip in clips:
         try:

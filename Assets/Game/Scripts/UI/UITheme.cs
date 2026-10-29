@@ -35,6 +35,20 @@ namespace NeonVelocity.UI
         public static Font Font => FontLibrary.Body;
         public static Sprite Rounded => TextureFactory.RoundedPanel;
         public static Sprite Glow => TextureFactory.Glow;
+        public static Sprite Border => TextureFactory.PanelBorder;
+
+        /// <summary>
+        /// Signature "glass card": rounded dark panel under a 9-sliced technical border
+        /// overlay. Returns the border image (child) so callers can tint the hairline.
+        /// </summary>
+        public static Image GlassCard(Transform parent, string name, Color fill, float borderOpacity = 0.55f)
+        {
+            var panel = PanelBox(parent, name, fill);
+            var border = Img(panel.transform, "Border", White.Alpha(borderOpacity), Border);
+            Stretch((RectTransform)border.transform, 2f, 2f, 2f, 2f);
+            border.raycastTarget = false;
+            return border;
+        }
 
         public static RectTransform NewRect(Transform parent, string name)
         {
@@ -143,6 +157,11 @@ namespace NeonVelocity.UI
 
             var text = Label(image.transform, "Label", label, fontSize, White, TextAnchor.MiddleCenter, FontStyle.Bold);
             Stretch((RectTransform)text.transform, 26f, 8f, 26f, 8f);
+            // Button labels are single-line by design. Wrapping to a hidden second line
+            // at some canvas scales silently shortened labels (e.g. COPY ACCOUNT NUMBER
+            // rendered as COPY ACCOUNT at 4K). Never wrap a button label.
+            text.horizontalOverflow = HorizontalWrapMode.Overflow;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
             AddShadow(text, new Color(0f, 0f, 0f, 0.55f), new Vector2(1f, -2f));
             return button;
         }
@@ -314,10 +333,13 @@ namespace NeonVelocity.UI
 
         public static Color Alpha(this Color color, float alpha) => new Color(color.r, color.g, color.b, alpha);
 
-        public static string FormatNumber(int value)
+        public static string FormatNumber(int value) => FormatNumber((long)value);
+
+        public static string FormatNumber(long value)
         {
-            if (value >= 1000000) return (value / 1000000f).ToString("0.0") + "M";
-            if (value >= 10000) return (value / 1000f).ToString("0.0") + "K";
+            if (value >= 1000000000L) return (value / 1000000000.0).ToString("0.0") + "B";
+            if (value >= 1000000L) return (value / 1000000.0).ToString("0.0") + "M";
+            if (value >= 10000L) return (value / 1000.0).ToString("0.0") + "K";
             return value.ToString("N0");
         }
 

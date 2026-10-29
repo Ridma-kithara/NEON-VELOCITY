@@ -1,6 +1,7 @@
 using System;
 using NeonVelocity.Utilities;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace NeonVelocity.UI
@@ -73,21 +74,22 @@ namespace NeonVelocity.UI
             }
 
             float contentLeft = back != null ? 112f : 34f;
-            float subtitleLeft = back != null ? 228f : 150f;
+            // Three stacked rows keep every section label, title and subtitle on their own
+            // line, so long section names can never collide with the description.
             var sectionLabel = UITheme.Label(band.transform, "Section", section, UITheme.SmallSize, accent,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)sectionLabel.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(contentLeft, 70f), new Vector2(-320f, 96f));
+                new Vector2(contentLeft, 101f), new Vector2(-320f, 123f));
 
             var titleLabel = UITheme.Label(band.transform, "Title", title, UITheme.TitleSize, UITheme.White,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)titleLabel.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(contentLeft, 20f), new Vector2(-320f, 72f));
+                new Vector2(contentLeft, 45f), new Vector2(-320f, 99f));
 
             var subtitleLabel = UITheme.Label(band.transform, "Subtitle", subtitle, UITheme.SmallSize, UITheme.Dim,
                 TextAnchor.MiddleLeft);
             UITheme.Anchor((RectTransform)subtitleLabel.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(subtitleLeft, 74f), new Vector2(-320f, 96f));
+                new Vector2(contentLeft, 11f), new Vector2(-320f, 39f));
 
             CurrencyStrip(band.transform, app);
         }
@@ -105,7 +107,7 @@ namespace NeonVelocity.UI
         public static void RefreshCurrency(Text label, GameApp app)
         {
             if (label == null || app == null || app.Profile == null) return;
-            label.text = "LVL " + app.Profile.level + "   \u25C6 " + UITheme.FormatNumber(app.Profile.credits);
+            label.text = "LVL " + app.Profile.level + "   \u25C6 " + UITheme.FormatNumber(app.Profile.credits) + " CREDITS";
         }
 
         public static Image Card(Transform parent, string name, Color? color = null)
@@ -120,23 +122,47 @@ namespace NeonVelocity.UI
         }
 
         public static Button MenuButton(Transform parent, string label, string subtitle, Color accent,
-            Action action, bool enabled = true)
+            Action action, bool enabled = true, bool compact = false)
         {
             var button = UITheme.Button(parent, label, "", accent,
-                enabled ? () => action() : (UnityEngine.Events.UnityAction)null, UITheme.HeadingSize);
+                enabled ? () => action() : (UnityEngine.Events.UnityAction)null,
+                compact ? UITheme.BodySize : UITheme.HeadingSize);
             var labelText = button.GetComponentInChildren<Text>();
             // The button's built-in label is reused for the title; subtitle is a second line.
             if (labelText != null)
             {
                 labelText.text = label;
                 labelText.alignment = TextAnchor.MiddleLeft;
-                UITheme.Stretch((RectTransform)labelText.transform, 30f, 28f, 180f, 6f);
+                labelText.horizontalOverflow = HorizontalWrapMode.Overflow;
+                if (compact)
+                    UITheme.Stretch((RectTransform)labelText.transform, 22f, 30f, 42f, 5f);
+                else
+                    UITheme.Stretch((RectTransform)labelText.transform, 30f, 40f, 64f, 6f);
             }
             if (!string.IsNullOrEmpty(subtitle))
             {
                 var sub = UITheme.Label(button.transform, "Sub", subtitle, UITheme.SmallSize, UITheme.Dim,
                     TextAnchor.MiddleLeft);
-                UITheme.Stretch((RectTransform)sub.transform, 30f, 6f, 180f, 26f);
+                sub.horizontalOverflow = HorizontalWrapMode.Overflow;
+                if (compact)
+                    UITheme.Stretch((RectTransform)sub.transform, 22f, 4f, 42f, 32f);
+                else
+                    UITheme.Stretch((RectTransform)sub.transform, 30f, 6f, 64f, 46f);
+            }
+            // Right chevron marks the row as navigable; underline sweeps in on hover.
+            var chevron = UITheme.Label(button.transform, "Chevron", "\u203A", UITheme.BodySize, accent,
+                TextAnchor.MiddleRight, FontStyle.Bold);
+            UITheme.Stretch((RectTransform)chevron.transform, -160f, 6f, 24f, 6f);
+            var underline = UITheme.Img(button.transform, "Underline", accent);
+            UITheme.Anchor((RectTransform)underline.transform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                new Vector2(30f, 2f), new Vector2(160f, 4f));
+            underline.raycastTarget = false;
+            underline.canvasRenderer.SetAlpha(0f);
+            if (enabled)
+            {
+                var hover = UiFx.Hover(button.gameObject, 1.035f, labelText, Color.white);
+                UiFx.Press(button.gameObject, 0.97f);
+                hover.gameObject.AddComponent<MenuButtonUnderline>().Configure(underline);
             }
             if (!enabled)
             {
@@ -178,6 +204,34 @@ namespace NeonVelocity.UI
                 ? "BEST " + UITheme.FormatDistance(best.distance)
                 : "NO RECORD";
             return bestText;
+        }
+    }
+
+    /// <summary>Fades a menu row's underline in while the row is hovered or focused.</summary>
+    public sealed class MenuButtonUnderline : MonoBehaviour, IPointerEnterHandler, IPointerExitHandler, ISelectHandler, IDeselectHandler
+    {
+        private Image _underline;
+        private Color _color;
+        private float _weight;
+        private bool _entered;
+
+        public void Configure(Image underline)
+        {
+            _underline = underline;
+            if (_underline != null) _color = _underline.color;
+        }
+
+        public void OnPointerEnter(PointerEventData eventData) => _entered = true;
+        public void OnPointerExit(PointerEventData eventData) => _entered = false;
+        public void OnSelect(BaseEventData eventData) => _entered = true;
+        public void OnDeselect(BaseEventData eventData) => _entered = false;
+
+        private void Update()
+        {
+            if (_underline == null) return;
+            _weight = Mathf.Lerp(_weight, _entered ? 1f : 0f, 1f - Mathf.Exp(-Time.unscaledDeltaTime * 12f));
+            float a = _weight * _color.a;
+            _underline.canvasRenderer.SetAlpha(a);
         }
     }
 }

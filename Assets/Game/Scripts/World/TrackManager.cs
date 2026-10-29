@@ -65,6 +65,10 @@ namespace NeonVelocity.World
             public Material WarmLamp;
             public Material WarmGlow;
             public Material NeonSoft;
+            public Material Wood;
+            public Material Sand;
+            public Material Snow;
+            public Material Rock;
         }
 
         private GameConfig _config;
@@ -77,17 +81,26 @@ namespace NeonVelocity.World
         private readonly Dictionary<int, Segment> _active = new Dictionary<int, Segment>();
         private readonly Stack<Segment> _freeSegments = new Stack<Segment>();
         private readonly List<Segment> _activeList = new List<Segment>();
-        private readonly ThemeMaterials[] _themeMaterials = new ThemeMaterials[4];
+        private readonly ThemeMaterials[] _locationMaterials = new ThemeMaterials[LocationCatalog.Count];
         private int _nextIndex;
         private float _worldOffset;
         private int _currentBiome = -1;
+        private int _currentZone = -1;
+        private float _lastDistance;
 
         public float WorldOffset => _worldOffset;
         public int CurrentBiome => _currentBiome;
+        public int CurrentStyle => _currentBiome;
+        public int CurrentLocation => _currentZone;
+        public int CurrentZoneIndex => _currentZone;
+        public float TrackDistance => _lastDistance;
+        public string CurrentLocationName => _currentZone >= 0
+            ? LocationCatalog.Get(_currentZone).displayName : "";
         public int ActiveSegmentCount => _active.Count;
         public int PooledObstacleCount { get; private set; }
         public int PooledPickupCount { get; private set; }
         public event Action<int> BiomeChanged;
+        public event Action<int> LocationChanged;
 
         public void Initialise(GameConfig config, ModeSpec mode, int seed)
         {
@@ -112,44 +125,70 @@ namespace NeonVelocity.World
             _nextIndex = 0;
             _worldOffset = 0f;
             _currentBiome = -1;
+            _currentZone = -1;
+            _lastDistance = 0f;
         }
 
         public void SetMode(ModeSpec mode) => _mode = mode;
 
         private void BuildThemeMaterials()
         {
-            for (int i = 0; i < 4; i++)
+            // Four architectural texture families are shared by the fifteen districts. Each
+            // district still gets its own palette, glow, glass and signage materials, which
+            // keeps the world visually distinct without duplicating fifteen texture atlases.
+            var asphalt = new Texture2D[4];
+            var asphaltNormal = new Texture2D[4];
+            var concrete = new Texture2D[4];
+            var transit = new Texture2D[4];
+            var adA = new Texture2D[4];
+            var adB = new Texture2D[4];
+            var shop = new Texture2D[4];
+            var windowA = new Texture2D[4];
+            var windowB = new Texture2D[4];
+            var windowC = new Texture2D[4];
+            for (int style = 0; style < 4; style++)
             {
-                var theme = _config.Theme(i);
-                if (theme == null) continue;
-                var asphalt = TextureFactory.Asphalt(7701 + i);
-                var asphaltNormal = TextureFactory.AsphaltNormal(7701 + i);
-                var concrete = TextureFactory.Concrete(8801 + i);
-                var transit = TextureFactory.SignBoard(4401 + i * 13, Palette.Magenta, i + 1);
-                var adA = TextureFactory.BillboardArt(1201 + i * 7, theme.accent, i);
-                var adB = TextureFactory.BillboardArt(8801 + i * 11, Palette.Magenta, i + 1);
-                var shop = TextureFactory.ShopWindow(2101 + i * 17, theme.accent, i);
+                asphalt[style] = TextureFactory.Asphalt(7701 + style);
+                asphaltNormal[style] = TextureFactory.AsphaltNormal(7701 + style);
+                concrete[style] = TextureFactory.Concrete(8801 + style);
+                transit[style] = TextureFactory.SignBoard(4401 + style * 13, Palette.Magenta, style + 1);
+                adA[style] = TextureFactory.BillboardArt(1201 + style * 7, Palette.Cyan, style);
+                adB[style] = TextureFactory.BillboardArt(8801 + style * 11, Palette.Magenta, style + 1);
+                shop[style] = TextureFactory.ShopWindow(2101 + style * 17, Palette.Cyan, style);
+                windowA[style] = TextureFactory.WindowFacade(3301 + style * 11);
+                windowB[style] = TextureFactory.WindowFacade(9901 + style * 17);
+                windowC[style] = TextureFactory.WindowFacade(6601 + style * 23, 1);
+            }
+
+            for (int index = 0; index < LocationCatalog.Count; index++)
+            {
+                var location = LocationCatalog.Get(index);
+                var theme = _config.LocationTheme(index) ?? _config.Theme(index);
+                if (theme == null || location == null) continue;
+                int style = Mathf.Abs(location.style) % 4;
+                string key = "_" + location.id;
+                float wet = location.rain ? 0.34f : 0.2f;
                 var m = new ThemeMaterials
                 {
-                    Ground = MaterialLibrary.LitTextured("NV_AsphaltMat_" + i, asphalt,
+                    Ground = MaterialLibrary.LitTextured("NV_AsphaltMat" + key, asphalt[style],
                         Color.Lerp(theme.ground, Color.white, 0.24f), 0.22f, 0.94f,
-                        new Vector2(2.4f, 10f), asphaltNormal, new Vector2(2.4f, 10f), 1.05f),
-                    GroundDark = MaterialLibrary.LitTextured("NV_DeckMat_" + i, concrete,
+                        new Vector2(2.4f, 10f), asphaltNormal[style], new Vector2(2.4f, 10f), 1.05f),
+                    GroundDark = MaterialLibrary.LitTextured("NV_DeckMat" + key, concrete[style],
                         Color.Lerp(theme.ground, Palette.Void, 0.48f), 0.25f, 0.42f,
                         new Vector2(2f, 8f)),
-                    Podium = MaterialLibrary.LitTextured("NV_PodiumMat_" + i, concrete,
+                    Podium = MaterialLibrary.LitTextured("NV_PodiumMat" + key, concrete[style],
                         Color.Lerp(theme.buildingA, Color.white, 0.24f), 0.09f, 0.56f,
                         new Vector2(1.8f, 2.4f)),
-                    Sidewalk = MaterialLibrary.LitTextured("NV_SidewalkMat_" + i, concrete,
+                    Sidewalk = MaterialLibrary.LitTextured("NV_SidewalkMat" + key, concrete[style],
                         Color.Lerp(theme.buildingA, Color.white, 0.18f), 0.12f, 0.5f,
                         new Vector2(2f, 12f)),
                     Puddle = MaterialLibrary.Lit(Color.Lerp(theme.skyBottom, Palette.Void, 0.45f), 0.92f, 0.99f),
-                    WetGlow = MaterialLibrary.UnlitAdditiveTextured("NV_WetGlow_" + i,
+                    WetGlow = MaterialLibrary.UnlitAdditiveTextured("NV_WetGlow" + key,
                         TextureFactory.RadialGlow(64),
-                        new Color(theme.accent.r, theme.accent.g, theme.accent.b, 0.3f), Vector2.one, false, -30),
-                    WetGlowAlt = MaterialLibrary.UnlitAdditiveTextured("NV_WetGlowAlt_" + i,
+                        new Color(theme.accent.r, theme.accent.g, theme.accent.b, wet), Vector2.one, false, -30),
+                    WetGlowAlt = MaterialLibrary.UnlitAdditiveTextured("NV_WetGlowAlt" + key,
                         TextureFactory.RadialGlow(64),
-                        new Color(Palette.Magenta.r, Palette.Magenta.g, Palette.Magenta.b, 0.22f),
+                        new Color(Palette.Magenta.r, Palette.Magenta.g, Palette.Magenta.b, wet * 0.72f),
                         Vector2.one, false, -30),
                     Metal = MaterialLibrary.Lit(Color.Lerp(theme.buildingA, Palette.White, 0.13f), 0.88f, 0.76f),
                     Paint = MaterialLibrary.Lit(Color.Lerp(Palette.White, theme.accent, 0.18f), 0.08f, 0.74f),
@@ -159,18 +198,18 @@ namespace NeonVelocity.World
                     BuildingA = MaterialLibrary.Lit(theme.buildingA, 0.4f, 0.5f),
                     BuildingB = MaterialLibrary.Lit(theme.buildingB, 0.4f, 0.5f),
                     Roof = MaterialLibrary.Lit(Color.Lerp(theme.buildingB, Palette.Void, 0.55f), 0.4f, 0.35f),
-                    Billboard = MaterialLibrary.UnlitTextured("NV_AdA_" + i, adA,
+                    Billboard = MaterialLibrary.UnlitTextured("NV_AdA" + key, adA[style],
                         new Color(1.32f, 1.32f, 1.32f, 1f), Vector2.one),
-                    Sign = MaterialLibrary.UnlitTextured("NV_Transit_" + i, transit,
+                    Sign = MaterialLibrary.UnlitTextured("NV_Transit" + key, transit[style],
                         new Color(1.05f, 1.05f, 1.05f, 1f), Vector2.one),
-                    SignAlt = MaterialLibrary.UnlitTextured("NV_AdB_" + i, adB,
+                    SignAlt = MaterialLibrary.UnlitTextured("NV_AdB" + key, adB[style],
                         new Color(1.28f, 1.28f, 1.28f, 1f), Vector2.one),
-                    Shop = MaterialLibrary.UnlitTextured("NV_ShopMat_" + i, shop,
+                    Shop = MaterialLibrary.UnlitTextured("NV_ShopMat" + key, shop[style],
                         new Color(1.16f, 1.16f, 1.16f, 1f), Vector2.one),
                     Pipe = MaterialLibrary.Lit(Color.Lerp(theme.buildingA, theme.accent, 0.12f), 0.8f, 0.7f),
                     White = MaterialLibrary.Lit(Palette.White, 0.2f, 0.8f, Palette.White, 1.2f),
                     WarmLamp = MaterialLibrary.Lit(Palette.Amber, 0.2f, 0.8f, Palette.Amber, 2.6f),
-                    WarmGlow = MaterialLibrary.UnlitAdditiveTextured("NV_WarmGlow_" + i,
+                    WarmGlow = MaterialLibrary.UnlitAdditiveTextured("NV_WarmGlow" + key,
                         TextureFactory.RadialGlow(64),
                         new Color(1f, 0.62f, 0.3f, 0.24f), Vector2.one, false, -30),
                     NeonSoft = MaterialLibrary.Lit(Color.Lerp(theme.accent, Palette.White, 0.25f),
@@ -179,17 +218,14 @@ namespace NeonVelocity.World
                 // Window atlases are mapped in world units by DecorMeshBuilder.Facade. Their
                 // mipmaps prevent the previous per-pixel window shimmer at distance, and the
                 // three families give each block a different architectural identity.
-                var texA = TextureFactory.WindowFacade(3301 + i * 11);
-                var texB = TextureFactory.WindowFacade(9901 + i * 17);
-                var texC = TextureFactory.WindowFacade(6601 + i * 23, 1);
                 Color facadeATint = Color.Lerp(Color.white, theme.accent, 0.10f) * 1.08f;
                 Color facadeBTint = Color.Lerp(Color.white, Palette.Magenta, 0.10f) * 1.06f;
                 Color facadeCTint = Color.Lerp(Color.white, Palette.Amber, 0.08f) * 1.04f;
-                m.BuildingA = MaterialLibrary.UnlitTextured("NV_WinA_" + i, texA,
+                m.BuildingA = MaterialLibrary.UnlitTextured("NV_WinA" + key, windowA[style],
                     facadeATint, Vector2.one);
-                m.BuildingB = MaterialLibrary.UnlitTextured("NV_WinB_" + i, texB,
+                m.BuildingB = MaterialLibrary.UnlitTextured("NV_WinB" + key, windowB[style],
                     facadeBTint, Vector2.one);
-                m.BuildingC = MaterialLibrary.UnlitTextured("NV_WinC_" + i, texC,
+                m.BuildingC = MaterialLibrary.UnlitTextured("NV_WinC" + key, windowC[style],
                     facadeCTint, Vector2.one);
 
                 Color leaf = Color.Lerp(new Color(0.055f, 0.16f, 0.10f), theme.accent, 0.11f);
@@ -199,10 +235,24 @@ namespace NeonVelocity.World
                 m.FoliageLight = MaterialLibrary.Lit(leafLight, 0.02f, 0.3f, leafLight, 0.16f);
                 m.Bark = MaterialLibrary.Lit(new Color(0.18f, 0.125f, 0.083f), 0.05f, 0.32f,
                     new Color(0.16f, 0.10f, 0.055f), 0.35f);
-                m.LampHaze = MaterialLibrary.UnlitAdditiveTextured("NV_LampHaze_" + i,
+                // Shared thematic substrates tinted per location: timber, sandstone, snow and
+                // ripped rock. Each texture is generated once and reused by all 20 districts.
+                m.Wood = MaterialLibrary.LitTextured("NV_WoodMat" + key, TextureFactory.WoodPlanks(3101),
+                    Color.Lerp(new Color(0.42f, 0.28f, 0.16f), theme.buildingA, 0.16f), 0.04f, 0.4f,
+                    new Vector2(1.4f, 1.4f));
+                m.Sand = MaterialLibrary.LitTextured("NV_SandMat" + key, TextureFactory.Sandstone(5171),
+                    Color.Lerp(new Color(0.78f, 0.62f, 0.4f), theme.buildingA, 0.2f), 0.02f, 0.5f,
+                    new Vector2(2.2f, 2.2f));
+                m.Snow = MaterialLibrary.LitTextured("NV_SnowMat" + key, TextureFactory.SnowSurface(7111),
+                    Color.Lerp(new Color(0.86f, 0.92f, 1f), theme.buildingA, 0.05f), 0.06f, 0.62f,
+                    new Vector2(1.8f, 1.8f));
+                m.Rock = MaterialLibrary.LitTextured("NV_RockMat" + key, TextureFactory.Concrete(9444),
+                    Color.Lerp(new Color(0.24f, 0.23f, 0.24f), theme.buildingB, 0.25f), 0.05f, 0.3f,
+                    new Vector2(1.2f, 2.6f));
+                m.LampHaze = MaterialLibrary.UnlitAdditiveTextured("NV_LampHaze" + key,
                     TextureFactory.LightShaft(),
                     new Color(1f, 0.7f, 0.38f, 0.17f), Vector2.one, false, -20);
-                _themeMaterials[i] = m;
+                _locationMaterials[index] = m;
             }
         }
 
@@ -226,13 +276,29 @@ namespace NeonVelocity.World
         public void Tick(float distance, bool generate = true)
         {
             if (_director == null) return;
-            int currentIndex = Mathf.FloorToInt(Mathf.Max(0f, distance) / SegmentLength);
+            _lastDistance = Mathf.Max(0f, distance);
+            int currentIndex = Mathf.FloorToInt(_lastDistance / SegmentLength);
             if (generate)
             {
                 int targetLast = currentIndex + Mathf.Max(2, _config.segmentsAhead);
-                while (_nextIndex <= targetLast)
+                int firstWanted = Mathf.Max(0, currentIndex - Mathf.Max(0, _config.segmentsBehind) - 1);
+
+                // A resume, seek or qualification jump must never iterate every skipped
+                // segment. Clear the stream and rebuild only the visible window.
+                bool jumpedForward = _nextIndex < firstWanted - 2;
+                bool jumpedBackward = _nextIndex > targetLast + 2;
+                if (jumpedForward || jumpedBackward)
                 {
-                    BuildSegment(_nextIndex);
+                    for (int i = 0; i < _activeList.Count; i++) ReleaseSegment(_activeList[i]);
+                    _active.Clear();
+                    _activeList.Clear();
+                    _nextIndex = firstWanted;
+                }
+
+                int guard = 0;
+                while (_nextIndex <= targetLast && guard++ < 256)
+                {
+                    if (!_active.ContainsKey(_nextIndex)) BuildSegment(_nextIndex);
                     _nextIndex++;
                 }
 
@@ -250,15 +316,34 @@ namespace NeonVelocity.World
                 }
             }
 
-            // Ask the director for the biome of the segment the runner is actually on. The
-            // director applies the seeded rotation offset after the opening city section, so
-            // using a local index/4 formula here would desynchronise lighting, rain and audio
-            // from the geometry as soon as the seed offset was non-zero.
-            int biome = _director.GetSegment(currentIndex).BiomeIndex;
-            if (biome != _currentBiome)
+            // Diagnostics are reported after the window has been built and trimmed. Updating
+            // them inside BuildSegment made the counts lag one segment behind ActiveSegmentCount.
+            PooledObstacleCount = _activeList.Count * 6;
+            PooledPickupCount = _activeList.Count * 24;
+
+            // Locations are pure distance zones. The event carries the zone index, not the
+            // wrapped location id, so the first visit to each district is persistent.
+            int zone = LocationCatalog.ZoneIndexForDistance(_lastDistance);
+            if (zone != _currentZone)
             {
-                _currentBiome = biome;
-                BiomeChanged?.Invoke(biome);
+                _currentZone = zone;
+                int style = LocationCatalog.Get(zone).style;
+                bool styleChanged = style != _currentBiome;
+                _currentBiome = style;
+                LocationChanged?.Invoke(zone);
+                if (styleChanged) BiomeChanged?.Invoke(style);
+            }
+        }
+
+        /// <summary>Advance kinematic hazards from the run clock, not wall time.</summary>
+        public void TickHazards(float simulationTime)
+        {
+            for (int i = 0; i < _activeList.Count; i++)
+            {
+                var segment = _activeList[i];
+                if (segment?.Obstacles == null) continue;
+                for (int j = 0; j < segment.Obstacles.Count; j++)
+                    segment.Obstacles[j]?.TickMotion(simulationTime);
             }
         }
 
@@ -293,8 +378,6 @@ namespace NeonVelocity.World
             _active[index] = segment;
             _activeList.Add(segment);
             _activeList.Sort((a, b) => a.Index.CompareTo(b.Index));
-            PooledObstacleCount = _activeList.Count * 6;
-            PooledPickupCount = _activeList.Count * 24;
         }
 
         private Segment CreateSegment()
@@ -350,22 +433,43 @@ namespace NeonVelocity.World
 
         private ThemeMaterials ThemeFor(SegmentPlan plan)
         {
-            int index = Mathf.Abs(plan.BiomeIndex) % 4;
-            return _themeMaterials[index] ?? _themeMaterials[0];
+            int index = LocationCatalog.Wrap(plan.BiomeIndex);
+            return _locationMaterials[index] ?? _locationMaterials[0];
         }
 
         private void BuildDecor(Segment segment)
         {
             var builder = new DecorMeshBuilder();
-            var theme = _config.Theme(segment.Plan.BiomeIndex);
+            var theme = _config.LocationTheme(segment.Plan.BiomeIndex);
             var mats = ThemeFor(segment.Plan);
             if (theme == null || mats == null) return;
+            var location = LocationCatalog.Get(segment.Plan.BiomeIndex);
+            int style = location != null ? location.style : 0;
             var rng = new DeterministicRandom(segment.Plan.Seed ^ 0x2A3B4C);
 
             BuildGround(builder, mats, segment.Plan, rng);
-            if (segment.Plan.BiomeIndex % 4 == 3) BuildTunnel(builder, mats, theme, rng);
-            else if (segment.Plan.BiomeIndex % 4 == 2) BuildReactor(builder, mats, theme, rng);
-            else BuildCity(builder, mats, theme, rng);
+            switch (style)
+            {
+                case 1: BuildLuxury(builder, mats, theme, rng); break;
+                case 2: BuildReactor(builder, mats, theme, rng); break;
+                case 3: BuildTunnel(builder, mats, theme, rng); break;
+                case 4: BuildSnow(builder, mats, theme, rng); break;
+                case 5: BuildDesert(builder, mats, theme, rng); break;
+                case 6: BuildCoast(builder, mats, theme, rng); break;
+                case 7: BuildForest(builder, mats, theme, rng); break;
+                case 8: BuildEuropean(builder, mats, theme, rng); break;
+                case 9: BuildVolcanic(builder, mats, theme, rng); break;
+                case 10: BuildJapanese(builder, mats, theme, rng); break;
+                case 11: BuildCryoHarbor(builder, mats, theme, rng); break;
+                case 12: BuildAlpineVillage(builder, mats, theme, rng); break;
+                case 13: BuildSeoul(builder, mats, theme, rng); break;
+                case 14: BuildSkybridge(builder, mats, theme, rng); break;
+                case 15: BuildSpaceport(builder, mats, theme, rng); break;
+                case 16: BuildRuins(builder, mats, theme, rng); break;
+                default: BuildCity(builder, mats, theme, rng); break;
+            }
+            BuildSignature(builder, mats, theme, location, segment.Plan, rng);
+            BuildJunction(builder, mats, location, segment.Plan, rng);
 
             if (segment.Plan.Index % 3 == 1) BuildGateway(builder, mats, rng);
             if (segment.Plan.IsEvent) BuildEventMarker(builder, mats);
@@ -378,8 +482,444 @@ namespace NeonVelocity.World
             segment.GlowRenderer.sharedMaterials = glowMaterials;
         }
 
+        /// <summary>
+        /// One authored landmark family per district. Props sit outside the playable lanes so
+        /// the silhouette changes with every 3 km zone without ever narrowing the dodge space.
+        /// </summary>
+        private static void BuildSignature(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme,
+            LocationDefinition location, SegmentPlan plan, DeterministicRandom rng)
+        {
+            if (location == null) return;
+            float z = SegmentLength * 0.5f + (plan.Index % 3 - 1) * 5.5f;
+            switch (location.signature)
+            {
+                case 0: // Neon Sprawl: stacked holographic news pillars.
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        b.Box(mats.Metal, new Vector3(side * 6.4f, 2.2f, z), new Vector3(0.22f, 4.4f, 0.22f));
+                        b.Quad(mats.Billboard, new Vector3(side * 6.4f, 3.4f, z + 0.14f),
+                            new Vector3(1.5f, 2.4f, 1f), Quaternion.Euler(0f, side > 0 ? 180f : 0f, 0f));
+                        b.Box(mats.Neon, new Vector3(side * 6.4f, 5.3f, z), new Vector3(0.9f, 0.05f, 0.06f));
+                    }
+                    break;
+                case 1: // Skyway 09: monorail arch over the road.
+                    b.Box(mats.Metal, new Vector3(-6.8f, 3.9f, z), new Vector3(0.5f, 7.8f, 0.5f));
+                    b.Box(mats.Metal, new Vector3(6.8f, 3.9f, z), new Vector3(0.5f, 7.8f, 0.5f));
+                    b.Box(mats.Trim, new Vector3(0f, 7.7f, z), new Vector3(14.2f, 0.55f, 0.7f));
+                    b.Box(mats.Neon, new Vector3(0f, 7.35f, z - 0.4f), new Vector3(11f, 0.07f, 0.08f));
+                    b.Quad(mats.Sign, new Vector3(0f, 6.7f, z - 0.38f), new Vector3(2.8f, 0.9f, 1f));
+                    break;
+                case 2: // Reactor Belt: glowing coolant coils.
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float x = 6.3f + i * 0.5f;
+                        b.Cylinder(mats.Metal, new Vector3(x, 2.4f, z - 3f + i * 3f), new Vector3(1.1f, 4.8f, 1.1f));
+                        b.Cylinder(mats.Neon, new Vector3(x, 4.9f, z - 3f + i * 3f), new Vector3(1.25f, 0.16f, 1.25f));
+                    }
+                    break;
+                case 3: // Ghost Tunnel: sealed vault ring.
+                    b.Cylinder(mats.Metal, new Vector3(6.5f, 3.1f, z), new Vector3(3.6f, 0.4f, 3.6f),
+                        Quaternion.Euler(90f, 0f, 0f));
+                    b.Cylinder(mats.NeonAlt, new Vector3(6.5f, 3.1f, z - 0.25f), new Vector3(3.15f, 0.1f, 3.15f),
+                        Quaternion.Euler(90f, 0f, 0f));
+                    break;
+                case 4: // Monsoon Docks: cargo crane.
+                    b.Box(mats.Metal, new Vector3(-7.2f, 4.2f, z), new Vector3(0.4f, 8.4f, 0.4f));
+                    b.Box(mats.Trim, new Vector3(-4.3f, 8.1f, z), new Vector3(6.2f, 0.4f, 0.4f));
+                    b.Box(mats.NeonAlt, new Vector3(-2.2f, 5.6f, z), new Vector3(0.07f, 4.7f, 0.07f));
+                    b.Box(mats.SignAlt, new Vector3(-2.2f, 3.1f, z), new Vector3(1.8f, 1.3f, 1.2f));
+                    break;
+                case 5: // Solar Arcology: angled mirror array.
+                    for (int i = 0; i < 3; i++)
+                    {
+                        b.Quad(mats.Billboard, new Vector3(6.8f, 4.6f + i * 0.9f, z - 3f + i * 2.4f),
+                            new Vector3(3.2f, 1.7f, 1f), Quaternion.Euler(-24f, 204f, 0f));
+                        b.Box(mats.Metal, new Vector3(6.8f, 2.4f, z - 3f + i * 2.4f), new Vector3(0.18f, 4.8f, 0.18f));
+                    }
+                    break;
+                case 6: // Cryo Foundry: vent stacks.
+                    for (int i = 0; i < 2; i++)
+                    {
+                        float x = -6.4f - i * 1.2f;
+                        b.Cylinder(mats.Pipe, new Vector3(x, 3.2f, z + i * 4f), new Vector3(0.8f, 6.4f, 0.8f));
+                        b.Cylinder(mats.NeonSoft, new Vector3(x, 6.5f, z + i * 4f), new Vector3(1.05f, 0.12f, 1.05f));
+                    }
+                    break;
+                case 7: // Ember Transit: furnace chimney.
+                    b.Box(mats.BuildingB, new Vector3(7f, 4.8f, z), new Vector3(2.2f, 9.6f, 2.2f));
+                    b.Box(mats.WarmLamp, new Vector3(7f, 3.2f, z - 1.18f), new Vector3(1.3f, 0.85f, 0.08f));
+                    b.Box(mats.NeonAlt, new Vector3(7f, 8.4f, z), new Vector3(2.5f, 0.1f, 2.5f));
+                    break;
+                case 8: // Verdant Grid: hydroponic planters.
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float zi = z - 4f + i * 3.2f;
+                        b.Box(mats.Metal, new Vector3(-6.2f, 1.2f + i * 0.8f, zi), new Vector3(2.6f, 0.4f, 2.2f));
+                        b.Foliage(mats.Foliage, new Vector3(-6.2f, 1.8f + i * 0.8f, zi), new Vector3(2.2f, 1.0f, 1.8f));
+                        b.Box(mats.NeonSoft, new Vector3(-6.2f, 2.2f + i * 0.8f, zi), new Vector3(0.06f, 0.06f, 1.8f));
+                    }
+                    break;
+                case 9: // Halcyon Spire: golden needle.
+                    b.Cylinder(mats.Trim, new Vector3(6.6f, 4.5f, z), new Vector3(1.4f, 9f, 1.4f));
+                    b.Cylinder(mats.WarmLamp, new Vector3(6.6f, 9.2f, z), new Vector3(1.05f, 0.24f, 1.05f));
+                    b.Box(mats.Neon, new Vector3(6.6f, 6.2f, z), new Vector3(1.55f, 0.09f, 1.55f));
+                    break;
+                case 10: // Quantum Yard: gyroscopic rings.
+                    for (int i = 0; i < 3; i++)
+                    {
+                        b.Cylinder(mats.Neon, new Vector3(6.4f, 3.6f, z), new Vector3(3.5f - i * 0.7f, 0.08f, 3.5f - i * 0.7f),
+                            Quaternion.Euler(90f, 24f * i, 0f));
+                    }
+                    break;
+                case 11: // Null Cathedral: silent arches.
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float zi = z - 5f + i * 5f;
+                        b.Box(mats.Trim, new Vector3(-6.9f, 4.1f, zi), new Vector3(0.5f, 8.2f, 0.5f));
+                        b.Box(mats.Trim, new Vector3(6.9f, 4.1f, zi), new Vector3(0.5f, 8.2f, 0.5f));
+                        b.Box(mats.Sign, new Vector3(0f, 8.1f, zi), new Vector3(14.4f, 0.4f, 0.5f));
+                    }
+                    break;
+                case 12: // Tidal Exchange: turbine wheel.
+                    b.Cylinder(mats.Metal, new Vector3(6.6f, 3.4f, z), new Vector3(2.6f, 0.5f, 2.6f),
+                        Quaternion.Euler(0f, 0f, 90f));
+                    for (int i = 0; i < 4; i++)
+                    {
+                        b.Box(mats.NeonSoft, new Vector3(6.6f, 3.4f, z), new Vector3(0.16f, 2.4f, 0.7f),
+                            Quaternion.Euler(0f, 0f, 45f * i));
+                    }
+                    break;
+                case 13: // Aurora Relay: uplink mast.
+                    b.Box(mats.Metal, new Vector3(-6.6f, 5.4f, z), new Vector3(0.34f, 10.8f, 0.34f));
+                    for (int i = 0; i < 3; i++)
+                        b.Cylinder(mats.NeonAlt, new Vector3(-6.6f, 4.2f + i * 2.1f, z),
+                            new Vector3(2.2f - i * 0.4f, 0.07f, 2.2f - i * 0.4f));
+                    break;
+                case 14: // Obsidian Terminus: black monolith.
+                    b.Box(mats.BuildingA, new Vector3(6.8f, 4.8f, z), new Vector3(2.4f, 9.6f, 1.6f));
+                    b.Box(mats.NeonAlt, new Vector3(5.56f, 4.8f, z), new Vector3(0.06f, 8.8f, 0.08f));
+                    b.Box(mats.NeonAlt, new Vector3(6.8f, 9.5f, z), new Vector3(2.4f, 0.08f, 1.6f));
+                    break;
+                case 15: // Sakura Circuit: petal shrine gate.
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float zi = z - 3.6f + i * 3.6f;
+                        for (int side = -1; side <= 1; side += 2)
+                            b.Box(mats.NeonAlt, new Vector3(side * 6.4f, 2.6f, zi), new Vector3(0.22f, 5.2f, 0.22f));
+                        b.Box(mats.WarmLamp, new Vector3(0f, 5.5f, zi), new Vector3(13.4f, 0.26f, 0.34f));
+                        b.Box(mats.Roof, new Vector3(0f, 5.82f, zi), new Vector3(14.6f, 0.2f, 0.55f));
+                    }
+                    break;
+                case 16: // Dune Meridian: solar obelisk.
+                    b.Cylinder(mats.BuildingA, new Vector3(6.9f, 4.4f, z), new Vector3(1.6f, 8.8f, 1.6f));
+                    b.Cylinder(mats.NeonAlt, new Vector3(6.9f, 8.6f, z), new Vector3(2.3f, 0.14f, 2.3f));
+                    b.Box(mats.WarmLamp, new Vector3(6.9f, 5.4f, z - 0.82f), new Vector3(0.5f, 3.2f, 0.06f));
+                    break;
+                case 17: // Kessler Reach: launch gantry.
+                    b.Box(mats.Metal, new Vector3(-7.1f, 5.2f, z), new Vector3(0.55f, 10.4f, 0.55f));
+                    b.Box(mats.Metal, new Vector3(-4.3f, 9.9f, z), new Vector3(6.2f, 0.34f, 0.34f));
+                    b.Cylinder(mats.White, new Vector3(-3.4f, 4.2f, z), new Vector3(0.62f, 8.4f, 0.62f));
+                    b.Cylinder(mats.Neon, new Vector3(-3.4f, 8.55f, z), new Vector3(0.5f, 0.5f, 0.5f),
+                        Quaternion.Euler(0f, 0f, 45f));
+                    b.Box(mats.NeonAlt, new Vector3(-3.4f, 1.1f, z), new Vector3(0.9f, 0.24f, 0.9f));
+                    break;
+                case 18: // Aurelia Prime: union obelisk and dome.
+                    b.Cylinder(mats.Trim, new Vector3(6.8f, 4.6f, z), new Vector3(1.1f, 9.2f, 1.1f),
+                        Quaternion.Euler(0f, 0f, 45f));
+                    b.Cylinder(mats.Podium, new Vector3(6.8f, 1.1f, z), new Vector3(2.0f, 2.2f, 2.0f));
+                    b.Foliage(mats.WarmLamp, new Vector3(6.8f, 9.4f, z), new Vector3(0.9f, 0.55f, 0.9f));
+                    b.Box(mats.NeonSoft, new Vector3(6.8f, 6.5f, z), new Vector3(1.4f, 0.08f, 1.4f));
+                    break;
+                case 19: // Coral Expanse: living reef arch.
+                    for (int side = -1; side <= 1; side += 2)
+                    {
+                        b.Cylinder(mats.NeonSoft, new Vector3(side * 6.2f, 2.1f, z), new Vector3(0.5f, 4.2f, 0.5f),
+                            Quaternion.Euler(0f, 0f, side * -12f));
+                        b.Cylinder(mats.Neon, new Vector3(side * 6.2f, 4.35f, z), new Vector3(0.2f, 0.2f, 0.2f));
+                    }
+                    b.Cylinder(mats.FoliageLight, new Vector3(0f, 4.6f, z), new Vector3(0.36f, 12.2f, 0.36f),
+                        Quaternion.Euler(0f, 0f, 90f));
+                    for (int i = 0; i < 5; i++)
+                        b.Foliage(mats.NeonSoft, new Vector3(-4.4f + i * 2.2f, 4.95f, z),
+                            new Vector3(0.9f, 0.5f, 0.7f));
+                    break;
+                case 20: // Retired Helion Ring signature; kept as a defensive fallback, unused by all 20 active themes.
+                    for (int i = 0; i < 2; i++)
+                        b.Cylinder(mats.Neon, new Vector3(6.6f, 3.4f + i * 2.4f, z),
+                            new Vector3(2.8f - i * 0.5f, 0.12f, 2.8f - i * 0.5f), Quaternion.Euler(74f, i * 40f, 0f));
+                    b.Box(mats.White, new Vector3(6.6f, 3.4f, z), new Vector3(0.16f, 4.2f, 0.16f));
+                    b.Box(mats.NeonAlt, new Vector3(6.6f, 5.55f, z), new Vector3(1.1f, 0.1f, 1.1f));
+                    break;
+                default:
+                    b.Box(mats.BuildingA, new Vector3(6.8f, 4.8f, z), new Vector3(2.4f, 9.6f, 1.6f));
+                    b.Box(mats.NeonAlt, new Vector3(5.56f, 4.8f, z), new Vector3(0.06f, 8.8f, 0.08f));
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Junction set dressing: an overhead directional gantry, lane chevrons, a reward
+        /// beacon and kind-specific structure. All geometry stays outside the three running
+        /// lanes; the collision authority is the divider/edge obstacle spawned by the pool.
+        /// </summary>
+        private static void BuildJunction(DecorMeshBuilder b, ThemeMaterials mats, LocationDefinition location,
+            SegmentPlan plan, DeterministicRandom rng)
+        {
+            var junction = plan.Junction;
+            if (junction == null) return;
+            float commitZ = junction.CommitRow * RowSpacing;
+            float branchStartZ = junction.BranchStartRow * RowSpacing;
+            float branchEndZ = (junction.BranchEndRow + 1) * RowSpacing;
+
+            // Approach chevrons and a bright stop line make the commitment point readable from
+            // 126 m away, even at maximum speed.
+            for (int i = 0; i < 3; i++)
+            {
+                float z = commitZ - 5.5f + i * 2.4f;
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    b.Box(mats.Paint, new Vector3(side * 1.5f, 0.019f, z),
+                        new Vector3(0.22f, 0.012f, 2.0f), Quaternion.Euler(0f, side * 24f, 0f));
+                    b.Box(mats.Paint, new Vector3(side * 3.15f, 0.019f, z),
+                        new Vector3(0.22f, 0.012f, 2.0f), Quaternion.Euler(0f, side * 24f, 0f));
+                }
+            }
+            b.Box(mats.Neon, new Vector3(0f, 0.022f, commitZ - 0.35f), new Vector3(8.1f, 0.014f, 0.3f));
+
+            // Overhead gantry. Posts sit outside the guard rail so they never narrow the run.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                b.Box(mats.Metal, new Vector3(side * 4.62f, 2.65f, commitZ), new Vector3(0.26f, 5.3f, 0.26f));
+                b.Box(mats.NeonSoft, new Vector3(side * 4.47f, 2.65f, commitZ), new Vector3(0.04f, 4.8f, 0.05f));
+            }
+            b.Box(mats.Metal, new Vector3(0f, 5.22f, commitZ), new Vector3(9.5f, 0.3f, 0.34f));
+            b.Box(mats.GroundDark, new Vector3(0f, 4.52f, commitZ), new Vector3(5.1f, 1.08f, 0.2f));
+            b.Box(mats.Neon, new Vector3(0f, 5.04f, commitZ - 0.14f), new Vector3(4.7f, 0.05f, 0.04f));
+
+            // Two authored arrow stacks show that both lanes continue. The reward branch is
+            // additionally marked by a beacon; neither side is a trap.
+            AddDirectionArrow(b, mats.Neon, new Vector3(-2.75f, 4.52f, commitZ - 0.16f), -1f);
+            AddDirectionArrow(b, mats.NeonAlt, new Vector3(2.75f, 4.52f, commitZ - 0.16f), 1f);
+
+            int rewardLane = junction.RewardLane;
+            float rewardX = LaneMath.LaneToX(rewardLane);
+            Material rewardMaterial = junction.RewardIsSecret ? mats.NeonAlt : mats.WarmLamp;
+            for (int i = 0; i < 4; i++)
+            {
+                float z = branchStartZ + 2.4f + i * 3.4f;
+                float rx = rewardX + JunctionRules.RouteOffsetAt(junction, z, rewardLane);
+                b.Box(rewardMaterial, new Vector3(rx, 0.7f, z), new Vector3(0.06f, 1.4f, 0.06f));
+                b.Box(rewardMaterial, new Vector3(rx, 1.45f, z), new Vector3(0.34f, 0.08f, 0.34f),
+                    Quaternion.Euler(45f, 0f, 45f));
+            }
+            b.Box(rewardMaterial, new Vector3(rewardX, 2.45f, branchStartZ + 5.8f), new Vector3(1.5f, 0.06f, 0.12f));
+
+            if (junction.IsTJunction || junction.IsShortcut)
+                BuildCurvedBranchDecks(b, mats, junction);
+
+            // Lane edge glow runs the length of the branch, visually connecting the fork.
+            if (!junction.HasCurvedRoute)
+            {
+                for (int row = junction.BranchStartRow; row < junction.MergeRow; row++)
+                {
+                    float z = row * RowSpacing + RowSpacing * 0.5f;
+                    // Narrow bridges need a rail on the reclaimed side lanes, not a lane stripe.
+                    if (junction.IsNarrowBridge)
+                    {
+                        for (int side = -1; side <= 1; side += 2)
+                        {
+                            b.Box(mats.Metal, new Vector3(side * 1.72f, 0.58f, z), new Vector3(0.11f, 1.16f, RowSpacing));
+                            b.Box(mats.Neon, new Vector3(side * 1.66f, 1.17f, z), new Vector3(0.03f, 0.05f, RowSpacing));
+                        }
+                        b.Box(mats.Metal, new Vector3(0f, 4.2f, z), new Vector3(4.0f, 0.22f, RowSpacing * 0.92f));
+                        b.Box(mats.NeonSoft, new Vector3(0f, 4.07f, z), new Vector3(2.8f, 0.04f, 0.08f));
+                    }
+                    else if (junction.UsesMedian)
+                    {
+                        b.Box(mats.Paint, new Vector3(-1.36f, 0.02f, z), new Vector3(0.045f, 0.012f, RowSpacing));
+                        b.Box(mats.Paint, new Vector3(1.36f, 0.02f, z), new Vector3(0.045f, 0.012f, RowSpacing));
+                    }
+                }
+            }
+
+            if (junction.Kind == JunctionKind.Crossroads)
+            {
+                // A cross street reading: broad zebra bars and four signal heads. This is the
+                // visual identity of the crossroads even though both branches remain parallel.
+                for (int i = 0; i < 5; i++)
+                    b.Box(mats.Paint, new Vector3(-3.3f + i * 1.65f, 0.021f, branchEndZ - 3.2f),
+                        new Vector3(0.62f, 0.012f, 2.8f));
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    b.Box(mats.Metal, new Vector3(side * 4.5f, 3.15f, branchEndZ - 1.4f), new Vector3(0.18f, 6.3f, 0.18f));
+                    b.Box(mats.GroundDark, new Vector3(side * 4.5f, 6.15f, branchEndZ - 1.4f), new Vector3(0.55f, 1.2f, 0.2f));
+                    for (int light = 0; light < 3; light++)
+                        b.Box(light == 0 ? mats.NeonAlt : mats.Neon,
+                            new Vector3(side * 4.5f, 5.86f + light * 0.28f, branchEndZ - 1.52f),
+                            new Vector3(0.3f, 0.16f, 0.04f));
+                }
+            }
+            else if (junction.Kind == JunctionKind.TunnelBranch)
+            {
+                // Ribbed tunnel portal over the fork, open enough to keep the camera clear.
+                for (int row = junction.BranchStartRow; row <= junction.BranchEndRow; row++)
+                {
+                    float z = row * RowSpacing + RowSpacing * 0.5f;
+                    for (int side = -1; side <= 1; side += 2)
+                        b.Box(mats.Trim, new Vector3(side * 4.55f, 2.35f, z), new Vector3(0.42f, 4.7f, 0.52f));
+                    b.Box(mats.Trim, new Vector3(0f, 4.62f, z), new Vector3(9.3f, 0.44f, 0.52f));
+                    b.Box(mats.Neon, new Vector3(0f, 4.35f, z - 0.28f), new Vector3(7.6f, 0.06f, 0.04f));
+                }
+            }
+            else if (junction.IsBrokenRoad)
+            {
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    for (int i = 0; i < 5; i++)
+                    {
+                        float z = 11f + i * 3.1f;
+                        b.Box(mats.Metal, new Vector3(side * 4.55f, 0.52f, z), new Vector3(0.14f, 1.04f, 2.4f),
+                            Quaternion.Euler(i % 2 == 0 ? 7f : -9f, 0f, 0f));
+                    }
+                    b.Box(mats.Paint, new Vector3(side * 3.2f, 0.02f, 14.0f), new Vector3(1.4f, 0.012f, 0.18f),
+                        Quaternion.Euler(0f, side * 18f, 0f));
+                }
+                if (junction.IsCollapsingBridge)
+                {
+                    // Fractured side slabs and exposed rebar sell the imminent collapse.
+                    for (int i = 0; i < 6; i++)
+                    {
+                        float z = 10.5f + i * 2.4f;
+                        b.Box(mats.GroundDark, new Vector3(-4.1f + (i % 2) * 0.6f, -0.32f, z),
+                            new Vector3(1.4f, 0.26f, 1.6f), Quaternion.Euler(0f, i * 7f, i % 2 == 0 ? 9f : -11f));
+                        b.Box(mats.Metal, new Vector3(3.9f - (i % 2) * 0.7f, 0.18f, z + 0.8f),
+                            new Vector3(0.08f, 0.5f, 0.08f), Quaternion.Euler(i % 2 == 0 ? 22f : -18f, 0f, 0f));
+                    }
+                    b.Box(mats.NeonAlt, new Vector3(0f, 0.32f, 9.2f), new Vector3(7.8f, 0.06f, 0.08f));
+                }
+            }
+            else if (junction.Kind == JunctionKind.TJunction)
+            {
+                // A perpendicular cross street makes the T readable: the main road meets a
+                // lit avenue and the two branch decks curve out around the central median.
+                float crossZ = branchStartZ + RowSpacing;
+                b.Box(mats.Ground, new Vector3(0f, -0.283f, crossZ), new Vector3(26f, 0.55f, 7.2f));
+                b.Box(mats.GroundDark, new Vector3(0f, -0.76f, crossZ), new Vector3(24f, 0.5f, 6.4f));
+                for (int i = 0; i < 9; i++)
+                    b.Box(mats.Paint, new Vector3(-6.4f + i * 1.6f, 0.02f, crossZ + 2.1f),
+                        new Vector3(0.7f, 0.012f, 2.4f));
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    b.Box(mats.Metal, new Vector3(side * 5.4f, 3.4f, crossZ), new Vector3(0.2f, 6.8f, 0.2f));
+                    b.Box(mats.GroundDark, new Vector3(side * 5.4f, 6.65f, crossZ), new Vector3(0.6f, 1.3f, 0.22f));
+                    for (int light = 0; light < 3; light++)
+                        b.Box(light == 0 ? mats.NeonAlt : mats.Neon,
+                            new Vector3(side * 5.4f, 6.35f + light * 0.28f, crossZ - 0.14f),
+                            new Vector3(0.32f, 0.17f, 0.045f));
+                }
+                // Cross-street lane markings and kerb glow.
+                b.Box(mats.NeonSoft, new Vector3(0f, 0.018f, crossZ + 3.3f), new Vector3(22f, 0.02f, 0.08f));
+                b.Box(mats.NeonSoft, new Vector3(0f, 0.018f, crossZ - 3.3f), new Vector3(22f, 0.02f, 0.08f));
+            }
+            else if (junction.Kind == JunctionKind.Shortcut)
+            {
+                int side = junction.RewardOnLeft ? -1 : 1;
+                float sx = LaneMath.LaneToX(junction.RewardLane);
+                float signZ = branchStartZ - 4.2f;
+                b.Box(mats.Metal, new Vector3(sx, 2.0f, signZ), new Vector3(0.16f, 4.0f, 0.16f));
+                b.Box(mats.SignAlt, new Vector3(sx, 3.4f, signZ), new Vector3(2.4f, 0.7f, 0.08f));
+                AddDirectionArrow(b, mats.NeonAlt, new Vector3(sx + side * 0.4f, 3.4f, signZ - 0.06f), side);
+                b.Box(mats.Neon, new Vector3(sx, 0.028f, branchStartZ + RowSpacing * 1.5f),
+                    new Vector3(2.1f, 0.02f, 3.4f));
+            }
+            else if (junction.Kind == JunctionKind.CurvedRoad)
+            {
+                // Reflective bend boards on the outside of the curve reinforce the deck.
+                int side = junction.CurveSign;
+                for (int i = 0; i < 4; i++)
+                {
+                    float z = 8f + i * 7.4f;
+                    float x = JunctionRules.RouteOffsetAt(junction, z, 1) + side * 4.2f;
+                    b.Box(mats.Metal, new Vector3(x, 2.3f, z), new Vector3(0.14f, 4.6f, 0.14f));
+                    b.Box(mats.SignAlt, new Vector3(x + side * 0.08f, 3.5f, z),
+                        new Vector3(0.06f, 1.1f, 2.2f));
+                    AddDirectionArrow(b, mats.NeonAlt,
+                        new Vector3(x + side * 0.12f, 3.5f, z - 0.6f), side);
+                }
+                b.Box(mats.NeonSoft, new Vector3(0f, 0.024f, SegmentLength * 0.5f),
+                    new Vector3(7.2f, 0.012f, 0.12f));
+            }
+
+            // A small district-coloured crest on the gantry ties the junction to the biome.
+            if (location != null)
+                b.Box(mats.Sign, new Vector3(0f, 3.88f, commitZ - 0.14f), new Vector3(2.1f, 0.46f, 0.05f));
+        }
+
+        /// <summary>
+        /// Builds the physical side deck for the two curved branch shapes. The panel follows
+        /// the exact same lateral function the runner uses, so the visible road and the
+        /// collision route cannot drift apart. Panels overlap by 0.15 m to avoid seams.
+        /// </summary>
+        private static void BuildCurvedBranchDecks(DecorMeshBuilder b, ThemeMaterials mats, JunctionPlan junction)
+        {
+            float start = junction.BranchStartRow * RowSpacing;
+            float end = junction.MergeRow * RowSpacing;
+            const float step = 2.1f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                if (junction.IsShortcut && side != (junction.RewardOnLeft ? -1 : 1)) continue;
+                int lane = side < 0 ? 0 : 2;
+                for (float z = start + 0.7f; z < end; z += step)
+                {
+                    float x = LaneMath.LaneToX(lane) + JunctionRules.RouteOffsetAt(junction, z, lane);
+                    float yaw = Mathf.Atan(JunctionRules.RouteSlopeAt(junction, z, lane)) * Mathf.Rad2Deg;
+                    var rot = Quaternion.Euler(0f, yaw, 0f);
+                    // A T-junction deck must reach the central median. Without the extra width
+                    // the curved lane pulls away from the divider and leaves a visible hole in
+                    // the road. Shortcuts keep the narrower marked lane deck.
+                    float deckWidth = 3.05f;
+                    float deckX = x;
+                    if (junction.IsTJunction)
+                    {
+                        float outer = x + side * 1.62f;
+                        deckWidth = Mathf.Abs(outer) + 0.2f;
+                        deckX = outer * 0.5f;
+                    }
+                    b.Box(mats.Ground, new Vector3(deckX, -0.275f, z), new Vector3(deckWidth, 0.5f, step + 0.15f), rot);
+                    b.Box(mats.Paint, new Vector3(x, 0.014f, z), new Vector3(0.06f, 0.012f, step), rot);
+                    b.Box(mats.NeonSoft, new Vector3(x + side * 1.28f, 0.022f, z),
+                        new Vector3(0.06f, 0.014f, step), rot);
+                    b.Box(mats.Metal, new Vector3(x + side * 1.62f, 0.55f, z),
+                        new Vector3(0.12f, 1.1f, step + 0.1f), rot);
+                    b.Box(mats.Neon, new Vector3(x + side * 1.56f, 1.12f, z),
+                        new Vector3(0.045f, 0.05f, step), rot);
+                }
+                // Nose chevrons make the entrance legible at speed.
+                for (int i = 0; i < 2; i++)
+                {
+                    float z = start - 3.2f + i * 1.6f;
+                    b.Box(mats.Paint, new Vector3(side * 2.6f, 0.019f, z),
+                        new Vector3(0.2f, 0.012f, 1.5f), Quaternion.Euler(0f, side * 26f, 0f));
+                }
+            }
+        }
+
+        private static void AddDirectionArrow(DecorMeshBuilder b, Material material, Vector3 centre, float direction)
+        {
+            b.Box(material, centre + new Vector3(direction * 0.38f, 0f, 0f), new Vector3(0.72f, 0.16f, 0.04f));
+            b.Box(material, centre + new Vector3(direction * 0.72f, 0.16f, 0f),
+                new Vector3(0.44f, 0.13f, 0.04f), Quaternion.Euler(0f, 0f, direction * 38f));
+            b.Box(material, centre + new Vector3(direction * 0.72f, -0.16f, 0f),
+                new Vector3(0.44f, 0.13f, 0.04f), Quaternion.Euler(0f, 0f, direction * -38f));
+        }
+
         private static void BuildGround(DecorMeshBuilder b, ThemeMaterials mats, SegmentPlan plan, DeterministicRandom rng)
         {
+            if (plan.Junction != null && plan.Junction.IsCurvedRoad)
+            {
+                BuildCurvedGround(b, mats, plan.Junction, rng);
+                return;
+            }
             float half = SegmentLength * 0.5f;
             // Textured asphalt, a thicker structural deck and service pillars underneath.
             b.Box(mats.Ground, new Vector3(0f, -0.28f, half), new Vector3(9.4f, 0.55f, SegmentLength + 0.05f));
@@ -406,8 +946,9 @@ namespace NeonVelocity.World
                     b.Box(mats.Neon, new Vector3(x, 0.018f, z), new Vector3(0.16f, 0.012f, 0.09f));
             }
 
-            // Direction chevrons in the centre lane, only on the city and skyway biomes.
-            if (plan.BiomeIndex % 4 < 2)
+            // Direction chevrons in the centre lane, only on the city and skyway styles.
+            int groundStyle = LocationCatalog.Get(plan.BiomeIndex).style;
+            if (groundStyle < 2)
             {
                 for (int arrow = 0; arrow < 2; arrow++)
                 {
@@ -506,6 +1047,72 @@ namespace NeonVelocity.World
                 }
             }
 
+        }
+
+        /// <summary>
+        /// A genuine bend: instead of swapping the sky colour, the asphalt, markings, curbs,
+        /// rails and wet reflections are rebuilt in slices that follow the same lateral curve
+        /// the runner follows. Both ends return to centre so the straight neighbours join
+        /// without a visible seam.
+        /// </summary>
+        private static void BuildCurvedGround(DecorMeshBuilder b, ThemeMaterials mats,
+            JunctionPlan junction, DeterministicRandom rng)
+        {
+            const int slices = 16;
+            float slice = SegmentLength / slices;
+            for (int i = 0; i < slices; i++)
+            {
+                float z = (i + 0.5f) * slice;
+                float x = JunctionRules.RouteOffsetAt(junction, z, 1);
+                float yaw = Mathf.Atan(JunctionRules.RouteSlopeAt(junction, z, 1)) * Mathf.Rad2Deg;
+                var rot = Quaternion.Euler(0f, yaw, 0f);
+                b.Box(mats.Ground, new Vector3(x, -0.28f, z), new Vector3(9.4f, 0.55f, slice + 0.12f), rot);
+                b.Box(mats.GroundDark, new Vector3(x, -0.75f, z), new Vector3(7.5f, 0.5f, slice + 0.08f), rot);
+                for (int lane = 0; lane < 2; lane++)
+                    b.Box(mats.Paint, new Vector3(x - 1.35f + lane * 2.7f, 0.011f, z),
+                        new Vector3(0.045f, 0.01f, slice + 0.05f), rot);
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    b.Box(mats.Paint, new Vector3(x + side * 3.98f, 0.011f, z),
+                        new Vector3(0.07f, 0.01f, slice + 0.05f), rot);
+                    b.Box(mats.Metal, new Vector3(x + side * 4.85f, 0.55f, z),
+                        new Vector3(0.14f, 1.1f, slice + 0.1f), rot);
+                    b.Box(mats.Neon, new Vector3(x + side * 4.78f, 1.13f, z),
+                        new Vector3(0.04f, 0.045f, slice), rot);
+                    b.Box(mats.Sidewalk, new Vector3(x + side * 6.15f, 0.04f, z),
+                        new Vector3(2.1f, 0.2f, slice + 0.1f), rot);
+                }
+                if (i % 2 == 0)
+                {
+                    for (int lane = 0; lane < 3; lane++)
+                        b.Box(mats.Neon, new Vector3(x + LaneMath.LaneToX(lane), 0.018f, z),
+                            new Vector3(0.15f, 0.012f, 0.10f), rot);
+                }
+                if (i % 4 == 0)
+                {
+                    int side = junction.CurveSign;
+                    b.Box(mats.NeonAlt, new Vector3(x + side * 4.25f, 0.85f, z),
+                        new Vector3(0.42f, 0.08f, 0.06f),
+                        Quaternion.Euler(0f, yaw + side * 28f, 0f));
+                }
+            }
+            for (int i = 0; i < 3; i++)
+            {
+                float z = 7f + i * 14f;
+                float x = JunctionRules.RouteOffsetAt(junction, z, 1);
+                b.Box(mats.GroundDark, new Vector3(x, -6f, z), new Vector3(6.2f, 10f, 1.2f));
+            }
+            for (int i = 0; i < 6; i++)
+            {
+                int lane = rng.Range(0, 3);
+                float z = rng.Range(4f, SegmentLength - 4f);
+                float x = LaneMath.LaneToX(lane) + JunctionRules.RouteOffsetAt(junction, z, lane) +
+                          rng.Range(-0.55f, 0.55f);
+                Material glow = i % 3 == 0 ? mats.WetGlowAlt : mats.WetGlow;
+                b.Quad(glow, new Vector3(x, 0.042f, z),
+                    new Vector3(rng.Range(0.45f, 1.1f), rng.Range(2.1f, 4.8f), 1f),
+                    Quaternion.Euler(90f, rng.Range(-8f, 8f), 0f));
+            }
         }
 
         private static void BuildCity(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
@@ -762,11 +1369,11 @@ namespace NeonVelocity.World
                 // Midground towers and darker far silhouettes are generated in layers. The
                 // fog fades them successively, which creates atmospheric depth beyond the
                 // playable canyon without any authored skybox.
-                for (int i = 0; i < 4; i++)
+                for (int i = 0; i < 6; i++)
                 {
                     float farX = side * rng.Range(21f, 49f);
                     float farZ = rng.Range(-5f, SegmentLength + 5f);
-                    float farH = rng.Range(18f, 64f);
+                    float farH = rng.Range(18f, 78f);
                     float farW = rng.Range(6f, 15f);
                     float farD = rng.Range(7f, 16f);
                     Material farFacade = i % 3 == 0 ? mats.BuildingC : i % 2 == 0 ? mats.BuildingB : mats.BuildingA;
@@ -781,6 +1388,21 @@ namespace NeonVelocity.World
                                 farH * 0.7f, farZ),
                             new Vector3(0.08f, farH * 0.42f, 0.25f));
                     }
+                    if (farH > 40f && rng.Chance(0.6f))
+                    {
+                        // Antenna array on the taller midground mass.
+                        for (int mast = 0; mast < 2; mast++)
+                        {
+                            b.Box(mats.Trim, new Vector3(farX - farW * 0.24f + mast * farW * 0.48f,
+                                    farH + rng.Range(2f, 3.6f), farZ),
+                                new Vector3(0.12f, rng.Range(3.2f, 5.4f), 0.12f));
+                        }
+                    }
+                    if (rng.Chance(0.5f))
+                    {
+                        b.Box(mats.NeonAlt, new Vector3(farX, farH + 0.7f, farZ),
+                            new Vector3(0.34f, 0.14f, 0.34f));
+                    }
                     if (rng.Chance(0.45f))
                     {
                         b.Box(mats.Trim, new Vector3(farX, farH + 3f, farZ),
@@ -789,11 +1411,11 @@ namespace NeonVelocity.World
                             new Vector3(0.3f, 0.12f, 0.3f));
                     }
                 }
-                for (int i = 0; i < 2; i++)
+                for (int i = 0; i < 4; i++)
                 {
                     float farX = side * rng.Range(54f, 98f);
                     float farZ = rng.Range(-8f, SegmentLength + 8f);
-                    float farH = rng.Range(30f, 92f);
+                    float farH = rng.Range(30f, 104f);
                     float farW = rng.Range(10f, 24f);
                     float farD = rng.Range(10f, 24f);
                     b.Box(mats.GroundDark, new Vector3(farX, farH * 0.5f, farZ),
@@ -803,7 +1425,64 @@ namespace NeonVelocity.World
                         new Vector3(0.1f, 0.35f, farD * 0.7f));
                     b.Box(mats.Neon, new Vector3(farX, farH + 0.4f, farZ),
                         new Vector3(0.32f, 0.5f, 0.32f));
+                    if (rng.Chance(0.4f))
+                    {
+                        b.Quad(mats.Billboard, new Vector3(farX + side * (farW * 0.51f + 0.06f),
+                                farH * rng.Range(0.55f, 0.8f), farZ),
+                            new Vector3(0.06f, farH * rng.Range(0.22f, 0.35f), farW * 0.55f),
+                            Quaternion.Euler(0f, side * -8f, 0f));
+                    }
                 }
+
+                // A sky bridge joins two midground masses above the street canyon.
+                if (rng.Chance(0.36f))
+                {
+                    float bridgeY = rng.Range(14f, 21f);
+                    float bridgeZ = rng.Range(2f, SegmentLength - 6f);
+                    b.Box(mats.GroundDark, new Vector3(side * 19.5f, bridgeY, bridgeZ),
+                        new Vector3(7.5f, 1.15f, 1.7f));
+                    b.Box(mats.Trim, new Vector3(side * 19.5f, bridgeY + 0.75f, bridgeZ - 0.8f),
+                        new Vector3(7.3f, 0.12f, 0.12f));
+                    b.Box(mats.Trim, new Vector3(side * 19.5f, bridgeY + 0.75f, bridgeZ + 0.8f),
+                        new Vector3(7.3f, 0.12f, 0.12f));
+                    b.Box(mats.Neon, new Vector3(side * 19.5f, bridgeY - 0.68f, bridgeZ),
+                        new Vector3(6.5f, 0.09f, 0.14f));
+                }
+            }
+
+            // Cross-city sky bridge arching over the running canyon between the block rows.
+            if (rng.Chance(0.5f))
+            {
+                float archY = rng.Range(17f, 25f);
+                float archZ = rng.Range(6f, SegmentLength - 6f);
+                b.Box(mats.GroundDark, new Vector3(0f, archY, archZ), new Vector3(15.5f, 1.3f, 2.2f));
+                b.Box(mats.Trim, new Vector3(0f, archY + 0.95f, archZ - 1.05f),
+                    new Vector3(15.2f, 0.14f, 0.14f));
+                b.Box(mats.Trim, new Vector3(0f, archY + 0.95f, archZ + 1.05f),
+                    new Vector3(15.2f, 0.14f, 0.14f));
+                for (int foot = 0; foot < 4; foot++)
+                {
+                    float footX = -7.2f + foot * 4.8f;
+                    b.Box(mats.GroundDark, new Vector3(footX, archY * 0.5f, archZ + 1.9f),
+                        new Vector3(0.4f, archY, 0.4f));
+                }
+                b.Box(mats.Neon, new Vector3(0f, archY - 0.78f, archZ), new Vector3(13f, 0.1f, 0.16f));
+            }
+
+            // A media board hangs over the street on almost every second segment.
+            if (rng.Chance(0.62f))
+            {
+                float boardY = rng.Range(11f, 16f);
+                float boardZ = rng.Range(2f, SegmentLength - 4f);
+                b.Box(mats.Metal, new Vector3(0f, boardY, boardZ), new Vector3(9.5f, 2.7f, 0.24f));
+                b.Quad(mats.Billboard, new Vector3(0f, boardY, boardZ + 0.16f),
+                    new Vector3(9f, 2.35f, 1f));
+                b.Box(mats.GroundDark, new Vector3(-4.6f, boardY * 0.5f, boardZ),
+                    new Vector3(0.34f, boardY, 0.34f));
+                b.Box(mats.GroundDark, new Vector3(4.6f, boardY * 0.5f, boardZ),
+                    new Vector3(0.34f, boardY, 0.34f));
+                b.Box(mats.NeonAlt, new Vector3(0f, boardY - 1.55f, boardZ + 0.2f),
+                    new Vector3(9.4f, 0.09f, 0.1f));
             }
 
             // Cables and suspended lamps bridge the street above the runner.
@@ -933,9 +1612,1127 @@ namespace NeonVelocity.World
             }
         }
 
-        private static void BuildReactor(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        /// <summary>Luxury tech district: gold-edged glass podiums, topiary and crown-lit towers.</summary>
+        private static void BuildLuxury(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
         {
             float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                b.Box(mats.GroundDark, new Vector3(side * 6.7f, 0.16f, half), new Vector3(2.6f, 0.32f, SegmentLength));
+                b.Box(mats.Trim, new Vector3(side * 5.44f, 0.34f, half), new Vector3(0.08f, 0.06f, SegmentLength));
+                b.Box(mats.BuildingA, new Vector3(side * 8.4f, 2.2f, half), new Vector3(3.2f, 4.4f, SegmentLength));
+                for (int i = 0; i < 6; i++)
+                {
+                    float z = 3.2f + i * 6.6f;
+                    b.Box(mats.White, new Vector3(side * 6.76f, 2.2f, z), new Vector3(0.08f, 3.9f, 2.5f));
+                    b.Box(mats.NeonSoft, new Vector3(side * 6.71f, 3.7f, z), new Vector3(0.04f, 0.06f, 2.1f));
+                    b.Box(mats.Sign, new Vector3(side * 6.68f, 4.5f, z), new Vector3(0.05f, 0.34f, 1.6f));
+                    b.Box(mats.WarmLamp, new Vector3(side * 6.6f, 2.85f, z + 1.1f), new Vector3(0.06f, 0.08f, 0.3f));
+                }
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 6f + i * 13f + rng.Range(-1.4f, 1.4f);
+                    float x = side * (10.6f + rng.Range(0f, 1.4f));
+                    float height = rng.Range(17f, 27f);
+                    b.Facade(mats.BuildingB, new Vector3(x, height * 0.5f, z),
+                        new Vector3(5.4f, height, 7.8f), new Vector2(i * 0.25f, 0f));
+                    b.Box(mats.Roof, new Vector3(x, height + 0.12f, z), new Vector3(5.8f, 0.36f, 8.2f));
+                    b.Box(mats.Trim, new Vector3(x - side * 2.67f, height * 0.62f, z),
+                        new Vector3(0.12f, height * 0.74f, 0.16f));
+                    b.Box(mats.Neon, new Vector3(x - side * 2.72f, height + 0.48f, z),
+                        new Vector3(0.05f, 0.08f, 5.4f));
+                }
+                for (int i = 0; i < 4; i++)
+                {
+                    float z = 4.5f + i * 9.4f;
+                    b.Cylinder(mats.Bark, new Vector3(side * 6.35f, 0.72f, z), new Vector3(0.2f, 1.44f, 0.2f));
+                    b.Foliage(mats.Foliage, new Vector3(side * 6.35f, 1.85f, z),
+                        new Vector3(1.15f, 1.25f, 1.15f), Quaternion.Euler(0f, i * 24f, 0f));
+                }
+            }
+            b.Box(mats.Trim, new Vector3(0f, 5.7f, half), new Vector3(10.2f, 0.1f, 0.14f));
+            b.Box(mats.NeonSoft, new Vector3(0f, 5.58f, half), new Vector3(8.4f, 0.04f, 0.06f));
+
+            // Halcyon-spire signature: twin fountain basins and gilded promenade arches.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Fountain: plinth, stone basin, luminous water and a rising jet.
+                b.Cylinder(mats.Trim, new Vector3(side * 6.1f, 0.02f, 20f),
+                    new Vector3(1.5f, 0.02f, 1.5f));
+                b.Cylinder(mats.Podium, new Vector3(side * 6.1f, 0.17f, 20f),
+                    new Vector3(1.2f, 0.17f, 1.2f));
+                b.Cylinder(mats.NeonSoft, new Vector3(side * 6.1f, 0.3f, 20f),
+                    new Vector3(0.95f, 0.1f, 0.95f));
+                b.Cylinder(mats.White, new Vector3(side * 6.1f, 0.78f, 20f),
+                    new Vector3(0.08f, 0.35f, 0.08f));
+                b.Foliage(mats.Neon, new Vector3(side * 6.1f, 1.32f, 20f),
+                    new Vector3(0.42f, 0.25f, 0.42f));
+                // Gilded arch framing the promenade with a warm cove light.
+                float az = 12f;
+                for (int p = -1; p <= 1; p += 2)
+                    b.Box(mats.Trim, new Vector3(side * 5.9f, 1.7f, az + p * 1.05f),
+                        new Vector3(0.14f, 1.7f, 0.16f));
+                b.Box(mats.Trim, new Vector3(side * 5.9f, 3.55f, az), new Vector3(0.1f, 0.3f, 2.35f));
+                b.Box(mats.WarmLamp, new Vector3(side * 5.78f, 3.44f, az),
+                    new Vector3(0.06f, 0.06f, 2.2f));
+            }
+        }
+
+        /// <summary>Frozen industrial harbor: insulated quays, container stacks and ice cranes.</summary>
+        private static void BuildCryoHarbor(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                b.Box(mats.GroundDark, new Vector3(side * 7.5f, 1.9f, half), new Vector3(1.9f, 3.8f, SegmentLength));
+                for (int i = 0; i < 8; i++)
+                {
+                    float z = 2.6f + i * 5.2f;
+                    b.Box(mats.Metal, new Vector3(side * 6.52f, 1.9f, z), new Vector3(0.08f, 3.5f, 4.3f));
+                    b.Box(mats.NeonSoft, new Vector3(side * 6.46f, 3.2f, z), new Vector3(0.03f, 0.06f, 3.7f));
+                    if (i % 2 == 0)
+                        b.Box(mats.NeonAlt, new Vector3(side * 6.4f, 0.62f, z), new Vector3(0.04f, 0.08f, 1.9f));
+                }
+                for (int i = 0; i < 4; i++)
+                {
+                    float z = 4f + i * 10f;
+                    float x = side * (9.4f + (i % 2) * 1.5f);
+                    float y = 1.35f + (i % 2) * 2.45f;
+                    Material boxMat = i % 2 == 0 ? mats.BuildingB : mats.Shop;
+                    b.Box(boxMat, new Vector3(x, y, z), new Vector3(3.7f, 2.4f, 5.7f),
+                        Quaternion.Euler(0f, side * (i % 2 == 0 ? 2f : -3f), 0f));
+                    b.Box(mats.Metal, new Vector3(x, y + 1.25f, z), new Vector3(3.82f, 0.1f, 5.82f));
+                    b.Box(mats.White, new Vector3(x, y + 1.34f, z), new Vector3(3.5f, 0.08f, 5.5f));
+                }
+                float craneZ = 11f + (side > 0 ? 11.5f : 0f);
+                b.Box(mats.Metal, new Vector3(side * 10.6f, 7f, craneZ), new Vector3(0.55f, 14f, 0.55f));
+                b.Box(mats.Metal, new Vector3(side * 8f, 13.6f, craneZ), new Vector3(5.8f, 0.42f, 0.52f));
+                b.Box(mats.NeonAlt, new Vector3(side * 5.2f, 13.32f, craneZ), new Vector3(0.14f, 0.12f, 0.14f));
+                b.Box(mats.Metal, new Vector3(side * 5.2f, 9.4f, craneZ), new Vector3(0.05f, 8f, 0.05f));
+                b.Box(mats.WarmLamp, new Vector3(side * 5.2f, 5.34f, craneZ), new Vector3(0.22f, 0.26f, 0.22f));
+                for (int i = 0; i < 4; i++)
+                {
+                    float z = 3.2f + i * 9.2f;
+                    b.Box(mats.White, new Vector3(side * 5.95f, 0.24f, z),
+                        new Vector3(1.7f, 0.48f, rng.Range(2.8f, 4.6f)), Quaternion.Euler(0f, rng.Range(-8f, 8f), 0f));
+                    b.Box(mats.Pipe, new Vector3(side * 6.9f, 0.32f, z + 1.6f), new Vector3(0.16f, 0.16f, 3.2f));
+                }
+            }
+            b.Box(mats.Metal, new Vector3(0f, 8.6f, 20f), new Vector3(14.5f, 0.34f, 0.34f));
+            b.Box(mats.Neon, new Vector3(0f, 8.36f, 20f), new Vector3(9.5f, 0.05f, 0.08f));
+
+            // Cryo-harbor signature: drifting ice floes on the far water and mooring
+            // bollards with hawser rings along the quay coping.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                for (int i = 0; i < 4; i++)
+                {
+                    float z = 3.5f + i * 9.6f + rng.Range(-1.6f, 1.6f);
+                    float x = side * (14.4f + rng.Range(0f, 1.4f));
+                    float s = rng.Range(1.6f, 3.1f);
+                    b.Box(mats.White, new Vector3(x, 0.12f, z), new Vector3(s, 0.24f, s * 0.8f),
+                        Quaternion.Euler(0f, rng.Range(-14f, 14f), 0f));
+                    b.Box(mats.NeonSoft, new Vector3(x, 0.26f, z), new Vector3(s * 0.7f, 0.03f, s * 0.55f),
+                        Quaternion.Euler(0f, rng.Range(-10f, 10f), 0f));
+                }
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 5f + i * 12.4f;
+                    b.Cylinder(mats.Metal, new Vector3(side * 6.2f, 0.3f, z),
+                        new Vector3(0.3f, 0.3f, 0.3f));
+                    b.Box(mats.NeonAlt, new Vector3(side * 6.2f, 0.62f, z),
+                        new Vector3(0.1f, 0.06f, 0.34f));
+                    b.Box(mats.Rock, new Vector3(side * 6.2f, 0.06f, z),
+                        new Vector3(1.1f, 0.12f, 1.1f));
+                }
+            }
+        }
+
+        /// <summary>Alpine village: timber chalets, deep gables, flower boxes and a cable car.</summary>
+        private static void BuildAlpineVillage(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 4.5f + i * 13.2f + rng.Range(-0.8f, 0.8f);
+                    float x = side * 9.8f;
+                    float width = 5.2f;
+                    b.Box(mats.GroundDark, new Vector3(x, 0.55f, z), new Vector3(width + 0.5f, 1.1f, 6.8f));
+                    b.Facade(mats.BuildingA, new Vector3(x, 3.1f, z), new Vector3(width, 4.2f, 6.2f),
+                        new Vector2(i * 0.25f, 0.25f));
+                    b.Box(mats.Roof, new Vector3(x, 5.38f, z - 1.55f), new Vector3(width + 0.9f, 0.22f, 3.4f),
+                        Quaternion.Euler(side * 24f, 0f, 0f));
+                    b.Box(mats.Roof, new Vector3(x, 5.38f, z + 1.55f), new Vector3(width + 0.9f, 0.22f, 3.4f),
+                        Quaternion.Euler(-side * 24f, 0f, 0f));
+                    float nearX = x - side * (width * 0.5f + 0.03f);
+                    b.Box(mats.Trim, new Vector3(nearX, 4.35f, z), new Vector3(0.16f, 0.1f, 4.4f));
+                    b.Box(mats.Trim, new Vector3(nearX, 3.2f, z), new Vector3(0.12f, 0.09f, 4.2f));
+                    for (int post = -1; post <= 1; post++)
+                        b.Box(mats.Trim, new Vector3(nearX, 3.8f, z + post * 1.5f), new Vector3(0.08f, 1.1f, 0.08f));
+                    for (int flower = 0; flower < 3; flower++)
+                        b.Foliage(mats.Foliage, new Vector3(nearX - side * 0.18f, 4.52f, z - 1.4f + flower * 1.4f),
+                            new Vector3(0.52f, 0.28f, 0.52f), Quaternion.Euler(0f, flower * 33f, 0f));
+                    for (int lamp = -1; lamp <= 1; lamp += 2)
+                        b.Box(mats.WarmLamp, new Vector3(nearX - side * 0.1f, 2.65f, z + lamp * 1.55f),
+                            new Vector3(0.05f, 0.32f, 0.24f));
+                }
+                b.Box(mats.Metal, new Vector3(side * 7.35f, 4.8f, half), new Vector3(0.34f, 9.6f, 0.34f));
+                b.Box(mats.Metal, new Vector3(side * 6.6f, 9.5f, half), new Vector3(1.8f, 0.16f, 0.16f));
+                for (int i = 0; i < 4; i++)
+                {
+                    float z = 3f + i * 11f;
+                    float x = side * (11.4f + rng.Range(0f, 1.6f));
+                    b.Cylinder(mats.Bark, new Vector3(x, 1.4f, z), new Vector3(0.22f, 2.8f, 0.22f));
+                    for (int tier = 0; tier < 3; tier++)
+                        b.Foliage(mats.FoliageDark, new Vector3(x, 2.9f + tier * 0.95f, z),
+                            new Vector3(2.35f - tier * 0.52f, 1.15f, 2.35f - tier * 0.52f),
+                            Quaternion.Euler(0f, i * 29f + tier * 17f, 0f));
+                    b.Foliage(mats.White, new Vector3(x, 4.88f, z), new Vector3(1.05f, 0.28f, 1.05f));
+                }
+            }
+            b.Box(mats.Metal, new Vector3(0f, 10.3f, half), new Vector3(13.6f, 0.05f, 0.05f));
+            b.Box(mats.NeonSoft, new Vector3(0f, 10.24f, half), new Vector3(6.2f, 0.02f, 0.03f));
+            b.Box(mats.Trim, new Vector3(2.8f, 9.82f, half), new Vector3(0.9f, 0.72f, 1.25f));
+            b.Box(mats.WarmLamp, new Vector3(2.8f, 9.58f, half - 0.63f), new Vector3(0.66f, 0.06f, 0.03f));
+        }
+
+        /// <summary>Holographic river city: glass canals, media facades and an elevated maglev.</summary>
+        private static void BuildSeoul(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                b.Box(mats.GroundDark, new Vector3(side * 6.9f, -0.48f, half), new Vector3(2.7f, 0.68f, SegmentLength));
+                b.Box(mats.WetGlow, new Vector3(side * 6.65f, -0.12f, half), new Vector3(2.2f, 0.03f, SegmentLength));
+                b.Box(mats.NeonSoft, new Vector3(side * 5.52f, 0.6f, half), new Vector3(0.06f, 0.05f, SegmentLength));
+                for (int i = 0; i < 10; i++)
+                    b.Box(mats.Metal, new Vector3(side * 5.54f, 0.94f, 2f + i * 4.1f), new Vector3(0.05f, 0.7f, 0.05f));
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 6f + i * 13f + rng.Range(-0.8f, 0.8f);
+                    float x = side * (10.4f + rng.Range(0f, 1.2f));
+                    b.Facade(mats.BuildingB, new Vector3(x, 9f, z), new Vector3(5.8f, 18f, 7.4f),
+                        new Vector2(i * 0.25f, 0.5f));
+                    b.Box(mats.Roof, new Vector3(x, 18.15f, z), new Vector3(6.1f, 0.34f, 7.7f));
+                    float screenX = side * 7.46f;
+                    b.Box(mats.Sign, new Vector3(screenX, 10.6f, z), new Vector3(0.09f, 5.8f, 3.6f));
+                    b.Box(mats.Neon, new Vector3(screenX - side * 0.06f, 10.6f, z - 1.72f),
+                        new Vector3(0.04f, 5.4f, 0.08f));
+                    b.Box(mats.NeonAlt, new Vector3(screenX - side * 0.06f, 10.6f, z + 1.72f),
+                        new Vector3(0.04f, 5.4f, 0.08f));
+                    for (int band = 0; band < 4; band++)
+                        b.Box(mats.NeonSoft, new Vector3(screenX - side * 0.07f, 8.4f + band * 1.45f, z),
+                            new Vector3(0.03f, 0.05f, 3.1f));
+                }
+                b.Box(mats.Metal, new Vector3(side * 8.7f, 6.3f, half), new Vector3(0.55f, 0.4f, SegmentLength));
+                for (int i = 0; i < 3; i++)
+                    b.Box(mats.Metal, new Vector3(side * 8.7f, 3.1f, 6f + i * 14f), new Vector3(0.38f, 6.2f, 0.38f));
+                if (side > 0)
+                {
+                    b.Box(mats.White, new Vector3(side * 8.7f, 6.92f, half), new Vector3(1.5f, 0.9f, 8f));
+                    b.Box(mats.Neon, new Vector3(side * 8.7f, 6.72f, half), new Vector3(1.56f, 0.06f, 7.4f));
+                    b.Box(mats.NeonAlt, new Vector3(side * 8.7f, 7.28f, half), new Vector3(1.1f, 0.04f, 5.8f));
+                }
+                for (int i = 0; i < 3; i++)
+                    b.Box(mats.NeonSoft, new Vector3(side * 4.92f, 4.1f + i * 0.34f, 7f + i * 9f),
+                        new Vector3(0.03f, 0.16f, 1.3f), Quaternion.Euler(0f, side * 18f, 0f));
+            }
+
+            // Seoul-nexus signature: laminated glass splash walls and pedestrian bridge arcs
+            // tow-stretching over the canal water.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Glass splash walls along the canal coping, lit from below.
+                for (int w = 0; w < 3; w++)
+                {
+                    float z = 7f + w * 13f;
+                    b.Box(mats.NeonSoft, new Vector3(side * 6.06f, 0.62f, z), new Vector3(0.04f, 1.2f, 4.4f));
+                    b.Box(mats.Metal, new Vector3(side * 6.08f, 1.26f, z), new Vector3(0.06f, 0.08f, 4.5f));
+                }
+                // Two arcs stepping over the canal with under-lighting on the waterline.
+                for (int arc = 0; arc < 2; arc++)
+                {
+                    float z = 12f + arc * 16f;
+                    for (int k = 0; k <= 4; k++)
+                    {
+                        float t = k / 4f;
+                        float x = side * (5.9f + 1.7f * t);
+                        float y = 0.5f + Mathf.Sin(t * Mathf.PI) * 0.85f;
+                        b.Box(mats.Metal, new Vector3(x, y, z), new Vector3(0.7f, 0.12f, 0.9f));
+                    }
+                    b.Box(mats.Neon, new Vector3(side * 6.75f, 1.36f, z), new Vector3(3.4f, 0.05f, 0.5f));
+                    b.Quad(mats.WetGlowAlt, new Vector3(side * 6.75f, 0.05f, z),
+                        new Vector3(3.6f, 3.4f, 1f), Quaternion.Euler(90f, 0f, 0f));
+                }
+            }
+        }
+
+        /// <summary>Giant skybridge: deck-edge glass, mega pylons and suspended garden capsules.</summary>
+        private static void BuildSkybridge(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                b.Box(mats.Metal, new Vector3(side * 5.15f, 0.56f, half), new Vector3(0.14f, 1.12f, SegmentLength));
+                b.Box(mats.NeonSoft, new Vector3(side * 5.08f, 1.14f, half), new Vector3(0.04f, 0.05f, SegmentLength));
+                for (int i = 0; i < 9; i++)
+                    b.Box(mats.Metal, new Vector3(side * 5.15f, 0.9f, 1.8f + i * 4.6f), new Vector3(0.08f, 0.5f, 0.08f));
+                for (int i = 0; i < 2; i++)
+                {
+                    float z = 8f + i * 22f;
+                    float x = side * 11.5f;
+                    b.Facade(mats.BuildingA, new Vector3(x, 15f, z), new Vector3(7f, 30f, 9.5f),
+                        new Vector2(i * 0.25f, 0f));
+                    b.Box(mats.Roof, new Vector3(x, 30.2f, z), new Vector3(7.4f, 0.4f, 9.9f));
+                    b.Box(mats.Neon, new Vector3(x - side * 3.52f, 23f, z), new Vector3(0.06f, 12f, 0.14f));
+                    b.Box(mats.NeonAlt, new Vector3(x - side * 3.52f, 28.4f, z), new Vector3(0.06f, 0.08f, 6.2f));
+                }
+                b.Box(mats.Metal, new Vector3(side * 7.4f, 10.4f, half), new Vector3(0.42f, 20.8f, 0.42f));
+                b.Box(mats.Neon, new Vector3(side * 7.4f, 20.9f, half), new Vector3(0.15f, 0.1f, 0.15f));
+                for (int i = 0; i < 6; i++)
+                {
+                    float z = 3f + i * 7.4f;
+                    b.Box(mats.Metal, new Vector3(side * 5.4f, 14f, z), new Vector3(0.05f, 12f, 0.05f));
+                    b.Box(mats.NeonSoft, new Vector3(side * 5.36f, 8.2f, z), new Vector3(0.03f, 0.05f, 0.05f));
+                }
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 5f + i * 13f;
+                    b.Cylinder(mats.Metal, new Vector3(side * 10.2f, 8.4f, z), new Vector3(1.35f, 1.5f, 1.35f));
+                    b.Cylinder(mats.Neon, new Vector3(side * 10.2f, 9.2f, z), new Vector3(1.15f, 0.06f, 1.15f));
+                    b.Foliage(mats.Foliage, new Vector3(side * 10.2f, 10.1f, z), new Vector3(2.3f, 1.5f, 2.3f),
+                        Quaternion.Euler(0f, i * 31f, 0f));
+                }
+            }
+            b.Box(mats.Metal, new Vector3(0f, 20.2f, half), new Vector3(15.4f, 0.3f, 0.4f));
+            b.Box(mats.Neon, new Vector3(0f, 19.96f, half), new Vector3(11.2f, 0.05f, 0.08f));
+            b.Box(mats.Metal, new Vector3(0f, 12.4f, half), new Vector3(13.2f, 0.16f, 0.22f));
+
+            // Skyway-09 signature: catenary power arcs spanning the deck between pylons.
+            for (int a = 0; a < 2; a++)
+            {
+                float z = 10f + a * 21f;
+                for (int k = 0; k <= 5; k++)
+                {
+                    float t = k / 5f;
+                    float x = -7.6f + 15.2f * t;
+                    float y = 14.6f - Mathf.Sin(t * Mathf.PI) * 2.3f;
+                    b.Box(mats.Metal, new Vector3(x, y, z), new Vector3(0.1f, 0.14f, 0.14f));
+                    b.Box(mats.Neon, new Vector3(x, y - 0.14f, z), new Vector3(0.07f, 0.03f, 0.07f));
+                }
+                // Insulator posts reaching up to each arc end.
+                for (int side = -1; side <= 1; side += 2)
+                    b.Cylinder(mats.White, new Vector3(side * 7.6f, 13f, z),
+                        new Vector3(0.3f, 1.6f, 0.3f));
+            }
+        }
+
+        /// <summary>Spaceport city: launch gantries, fuel tanks, radar dishes and floodlights.</summary>
+        private static void BuildSpaceport(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                b.Box(mats.GroundDark, new Vector3(side * 7.7f, 2.2f, half), new Vector3(1.9f, 4.4f, SegmentLength));
+                for (int i = 0; i < 8; i++)
+                {
+                    float z = 2.4f + i * 5.1f;
+                    b.Box(mats.Metal, new Vector3(side * 6.7f, 2.2f, z), new Vector3(0.16f, 4.2f, 0.24f));
+                    b.Box(mats.Paint, new Vector3(side * 6.58f, 0.72f, z), new Vector3(0.05f, 0.5f, 2.4f),
+                        Quaternion.Euler(0f, side * 22f, 0f));
+                    b.Box(mats.NeonAlt, new Vector3(side * 6.55f, 3.6f, z), new Vector3(0.04f, 0.14f, 1.5f));
+                }
+                float gantryZ = 7f + (side > 0 ? 15f : 0f);
+                for (int leg = -1; leg <= 1; leg += 2)
+                    b.Box(mats.Metal, new Vector3(side * 10.2f, 10f, gantryZ + leg * 1.5f),
+                        new Vector3(0.55f, 20f, 0.55f));
+                for (int level = 1; level <= 4; level++)
+                    b.Box(mats.Metal, new Vector3(side * 10.2f, level * 4.2f, gantryZ),
+                        new Vector3(0.22f, 0.22f, 3.8f));
+                b.Box(mats.Metal, new Vector3(side * 8.9f, 17.4f, gantryZ), new Vector3(3.4f, 0.45f, 0.55f));
+                b.Box(mats.WarmLamp, new Vector3(side * 7.3f, 17.1f, gantryZ), new Vector3(0.2f, 0.26f, 0.28f));
+                b.Box(mats.Metal, new Vector3(side * 7.4f, 9.6f, gantryZ), new Vector3(3.8f, 0.24f, 0.3f));
+                b.Cylinder(mats.Metal, new Vector3(side * 10.8f, 4.3f, 25f), new Vector3(2.4f, 8.6f, 2.4f));
+                b.Cylinder(mats.Neon, new Vector3(side * 10.8f, 8.7f, 25f), new Vector3(2.5f, 0.1f, 2.5f));
+                b.Cylinder(mats.Pipe, new Vector3(side * 8.2f, 1.1f, 25f), new Vector3(0.24f, 6.6f, 0.24f),
+                    Quaternion.Euler(0f, 0f, 90f));
+                b.Cylinder(mats.Metal, new Vector3(side * 9.5f, 7.2f, 34f), new Vector3(2.3f, 0.24f, 2.3f),
+                    Quaternion.Euler(side * 32f, 0f, 0f));
+                b.Box(mats.Metal, new Vector3(side * 6.45f, 3.4f, 12f), new Vector3(0.16f, 6.8f, 0.16f));
+                b.Box(mats.Neon, new Vector3(side * 6.38f, 6.7f, 12f), new Vector3(0.1f, 0.28f, 0.55f));
+            }
+            b.Box(mats.Metal, new Vector3(0f, 9.5f, 20f), new Vector3(14.8f, 0.36f, 0.4f));
+            b.Box(mats.Neon, new Vector3(0f, 9.24f, 20f), new Vector3(10f, 0.06f, 0.1f));
+            b.Box(mats.Sign, new Vector3(0f, 8.55f, 20f), new Vector3(4.4f, 1.1f, 0.08f));
+
+            // Kessler-reach signature: a two-stage stack on a launch plinth with hold-down
+            // claws and an engine glow deck, mirrored behind each gantry line.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                float px = side * 13.4f;
+                float pz = 24f;
+                // Launch plinth and scorch deck.
+                b.Cylinder(mats.GroundDark, new Vector3(px, 0.25f, pz), new Vector3(3f, 0.25f, 3f));
+                b.Cylinder(mats.WarmGlow, new Vector3(px, 0.53f, pz), new Vector3(1.7f, 0.02f, 1.7f));
+                // First stage, interstage and payload fairing.
+                b.Cylinder(mats.White, new Vector3(px, 2.3f, pz), new Vector3(1.5f, 2f, 1.5f));
+                b.Cylinder(mats.Paint, new Vector3(px, 4.7f, pz), new Vector3(1.52f, 0.45f, 1.52f));
+                b.Cylinder(mats.White, new Vector3(px, 6.2f, pz), new Vector3(1.5f, 1.6f, 1.5f));
+                b.Cylinder(mats.BuildingB, new Vector3(px, 7.7f, pz), new Vector3(1.65f, 0.6f, 1.65f));
+                b.Foliage(mats.Neon, new Vector3(px, 8.5f, pz), new Vector3(1.2f, 0.9f, 1.2f));
+                // Hold-down claws gripping the first stage skirt.
+                for (int claw = 0; claw < 4; claw++)
+                {
+                    float ang = claw * Mathf.PI * 0.5f + Mathf.PI * 0.25f;
+                    float cx = px + Mathf.Cos(ang) * 1.35f;
+                    float cz = pz + Mathf.Sin(ang) * 1.35f;
+                    b.Box(mats.Metal, new Vector3(cx, 0.75f, cz), new Vector3(0.22f, 1.1f, 0.22f));
+                    b.Box(mats.NeonAlt, new Vector3(cx, 1.34f, cz), new Vector3(0.24f, 0.06f, 0.24f));
+                }
+                // Propellant ducts running from the gantry line to the plinth.
+                for (int duct = -1; duct <= 1; duct += 2)
+                    b.Box(mats.Pipe, new Vector3(side * 11.1f, 0.4f, pz + duct * 3.6f),
+                        new Vector3(4.6f, 0.2f, 0.5f));
+            }
+        }
+
+        /// <summary>Abandoned cyber city: collapsed slabs, exposed rebar and dead signage.</summary>
+        private static void BuildRuins(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    float z = 2.6f + i * 8.1f + rng.Range(-0.8f, 0.8f);
+                    float height = rng.Range(2.6f, 7.2f);
+                    float x = side * (9.4f + rng.Range(0f, 1.2f));
+                    b.Box(mats.GroundDark, new Vector3(x, height * 0.5f, z),
+                        new Vector3(4.6f, height, rng.Range(4.2f, 6.2f)));
+                    b.Box(mats.Roof, new Vector3(x, height + 0.12f, z),
+                        new Vector3(2.2f, 0.34f, rng.Range(1.8f, 3.2f)),
+                        Quaternion.Euler(rng.Range(-9f, 9f), rng.Range(-16f, 16f), side * rng.Range(4f, 14f)));
+                    for (int rod = 0; rod < 3; rod++)
+                        b.Box(mats.Metal, new Vector3(x - side * 2.1f, height + 0.5f, z - 1.4f + rod * 1.3f),
+                            new Vector3(0.06f, rng.Range(0.7f, 1.8f), 0.06f),
+                            Quaternion.Euler(rng.Range(-18f, 18f), 0f, side * rng.Range(-12f, 12f)));
+                    b.Box(mats.SignAlt, new Vector3(side * 7.06f, 1.75f, z), new Vector3(0.04f, 0.42f, 2.3f));
+                    if (i % 2 == 0)
+                        b.Box(mats.NeonAlt, new Vector3(side * 7.02f, 1.75f, z), new Vector3(0.03f, 0.06f, 1.7f));
+                }
+                for (int i = 0; i < 6; i++)
+                {
+                    float z = 3.4f + i * 6.2f;
+                    b.Box(mats.GroundDark, new Vector3(side * (5.85f + rng.Range(0f, 0.7f)), 0.22f, z),
+                        new Vector3(rng.Range(0.7f, 1.5f), rng.Range(0.28f, 0.55f), rng.Range(1.1f, 2.1f)),
+                        Quaternion.Euler(rng.Range(-8f, 8f), rng.Range(0f, 360f), rng.Range(-10f, 10f)));
+                }
+                b.Box(mats.Pipe, new Vector3(side * 6.4f, 2.6f, half), new Vector3(0.22f, 5.2f, 0.22f));
+                b.Box(mats.NeonSoft, new Vector3(side * 6.3f, 4.9f, half), new Vector3(0.04f, 0.08f, 3.4f));
+                for (int i = 0; i < 2; i++)
+                {
+                    float z = 10f + i * 19f;
+                    b.Box(mats.GroundDark, new Vector3(side * 7.8f, 0.8f, z), new Vector3(2.6f, 1.6f, 4.8f),
+                        Quaternion.Euler(0f, side * 24f, side * 12f));
+                }
+            }
+            b.Box(mats.Metal, new Vector3(0f, 7.2f, 20f), new Vector3(13.4f, 0.24f, 0.3f));
+            b.Box(mats.SignAlt, new Vector3(0f, 6.72f, 20f), new Vector3(5.2f, 0.62f, 0.06f));
+            b.Box(mats.NeonSoft, new Vector3(0f, 6.42f, 20f), new Vector3(3.4f, 0.03f, 0.05f));
+
+            // Null-cathedral signature: a fallen monolith and a cracked standing twin with
+            // dead cables strung between the surviving poles.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Fallen slab resing diagonally on a rubble cone.
+                b.Box(mats.BuildingB, new Vector3(side * 10.6f, 2.9f, 15f),
+                    new Vector3(1.1f, 13f, 4.4f), Quaternion.Euler(6f, side * 14f, side * 62f));
+                b.Foliage(mats.GroundDark, new Vector3(side * 12.9f, 0.5f, 17.4f),
+                    new Vector3(3.4f, 1.15f, 3.8f), Quaternion.Euler(0f, side * 24f, 0f));
+                b.Box(mats.GroundDark, new Vector3(side * 11.9f, 0.45f, 15.4f),
+                    new Vector3(1.7f, 0.9f, 2.4f), Quaternion.Euler(0f, 0f, side * 20f));
+                // Standing twin with a glowing fault seam.
+                b.Box(mats.BuildingB, new Vector3(side * 12.3f, 5.1f, 33.5f),
+                    new Vector3(1.5f, 10.2f, 3.1f));
+                b.Box(mats.NeonAlt, new Vector3(side * 11.5f, 5.1f, 33.5f),
+                    new Vector3(0.06f, 7.4f, 0.3f));
+                // Dipping dead cables from the pipe pole toward the slab.
+                for (int k = 0; k <= 4; k++)
+                {
+                    float t = k / 4f;
+                    float x = side * (6.6f + 3.4f * t);
+                    float y = 4.8f - Mathf.Sin(t * Mathf.PI) * 1.6f;
+                    b.Box(mats.Metal, new Vector3(x, y, 24.5f + side * 2f),
+                        new Vector3(0.9f, 0.07f, 0.07f), Quaternion.Euler(0f, side * 6f, 0f));
+                }
+            }
+        }
+
+        /// <summary>Snowbound highway: ploughed banks, frosted service walls and conifer stands.</summary>
+        private static void BuildSnow(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Ploughed snow banks sit over the sidewalk and recede from the running lanes.
+                for (int i = 0; i < 7; i++)
+                {
+                    float z = 2.5f + i * 6.2f + rng.Range(-0.9f, 0.9f);
+                    float h = rng.Range(0.4f, 0.95f);
+                    b.Box(mats.White, new Vector3(side * 6.05f, 0.18f + h * 0.5f, z),
+                        new Vector3(2.1f, h, rng.Range(3.4f, 5.6f)),
+                        Quaternion.Euler(0f, rng.Range(-7f, 7f), 0f));
+                }
+                // Insulated service wall, heat trace and frozen pipework.
+                b.Box(mats.GroundDark, new Vector3(side * 8.4f, 2.7f, half), new Vector3(1.5f, 5.4f, SegmentLength));
+                for (int i = 0; i < 6; i++)
+                {
+                    float z = 3f + i * 7f;
+                    b.Box(mats.Metal, new Vector3(side * 7.62f, 2.7f, z), new Vector3(0.18f, 5.2f, 0.24f));
+                    b.Cylinder(mats.Pipe, new Vector3(side * 7.36f, 1.45f, z + 2.1f),
+                        new Vector3(0.16f, 2.6f, 0.16f), Quaternion.Euler(90f, 0f, 0f));
+                    b.Box(mats.NeonSoft, new Vector3(side * 7.56f, 3.1f, z + 1.6f), new Vector3(0.05f, 0.07f, 4.6f));
+                }
+                // Snow-laden conifers beyond the wall.
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 6f + i * 13.5f + rng.Range(-2.2f, 2.2f);
+                    float x = side * (10.2f + rng.Range(0f, 2.2f));
+                    b.Cylinder(mats.Bark, new Vector3(x, 1.5f, z), new Vector3(0.24f, 3f, 0.24f));
+                    for (int tier = 0; tier < 3; tier++)
+                        b.Foliage(mats.FoliageDark, new Vector3(x, 3.1f + tier * 1.05f, z),
+                            new Vector3(2.5f - tier * 0.52f, 1.3f, 2.5f - tier * 0.52f),
+                            Quaternion.Euler(0f, i * 37f + tier * 19f, 0f));
+                    b.Foliage(mats.White, new Vector3(x, 5.15f, z), new Vector3(1.15f, 0.32f, 1.15f));
+                }
+                // Heated shelter with a warm lamp cone.
+                if (rng.Chance(0.7f))
+                {
+                    float z = 15f + rng.Range(-4f, 10f);
+                    b.Box(mats.Metal, new Vector3(side * 6.9f, 2.4f, z), new Vector3(1.7f, 0.16f, 3.4f),
+                        Quaternion.Euler(0f, 0f, side * 6f));
+                    for (int post = -1; post <= 1; post += 2)
+                        b.Box(mats.Metal, new Vector3(side * 6.9f, 1.2f, z + post * 1.4f), new Vector3(0.1f, 2.4f, 0.1f));
+                    b.Box(mats.WarmLamp, new Vector3(side * 7.2f, 2.15f, z - 1.2f), new Vector3(0.2f, 0.16f, 0.7f));
+                    b.Quad(mats.WarmGlow, new Vector3(side * 6.9f, 0.22f, z),
+                        new Vector3(2.2f, 3.1f, 1f), Quaternion.Euler(90f, 0f, 0f));
+                }
+            }
+            // Snow guards over the road so the flakes read as weather, not a screen overlay.
+            for (int i = 0; i < 2; i++)
+            {
+                float z = 10f + i * 21f;
+                b.Box(mats.Metal, new Vector3(0f, 6.4f, z), new Vector3(9.8f, 0.14f, 0.18f));
+                b.Box(mats.NeonSoft, new Vector3(0f, 6.28f, z), new Vector3(7.6f, 0.04f, 0.06f));
+            }
+
+            // Maple-frost signature: slatted avalanche fences and wind-polished ice boulders.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                for (int i = 0; i < 2; i++)
+                {
+                    float z = 9f + i * 19f;
+                    for (int p = 0; p < 4; p++)
+                        b.Box(mats.Wood, new Vector3(side * 9.6f, 0.62f, z + p * 2f),
+                            new Vector3(0.14f, 1.24f, 0.14f));
+                    for (int lath = -1; lath <= 1; lath++)
+                        b.Box(mats.Wood, new Vector3(side * 9.6f, 0.66f + lath * 0.44f, z + 3f),
+                            new Vector3(0.06f, 0.2f, 6.4f));
+                    b.Box(mats.Snow, new Vector3(side * 9.6f, 0.1f, z + 3f),
+                        new Vector3(4.2f, 0.2f, 7f));
+                }
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 6f + i * 12f + rng.Range(-2.6f, 2.6f);
+                    float x = side * (12.6f + rng.Range(0f, 2f));
+                    float s = rng.Range(1.2f, 2.4f);
+                    b.Foliage(mats.Rock, new Vector3(x, s * 0.42f, z), new Vector3(s, s * 0.8f, s * 0.9f),
+                        Quaternion.Euler(0f, rng.Range(0f, 180f), 0f));
+                    b.Foliage(mats.Snow, new Vector3(x, s * 0.78f, z),
+                        new Vector3(s * 0.62f, s * 0.24f, s * 0.6f));
+                }
+            }
+        }
+
+        /// <summary>Desert megastructure: sun-bleached pylons, solar arrays and dune berms.</summary>
+        private static void BuildDesert(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Stone service wall with deep carved window slots.
+                b.Box(mats.BuildingA, new Vector3(side * 8.6f, 2.2f, half), new Vector3(1.8f, 4.4f, SegmentLength));
+                for (int i = 0; i < 6; i++)
+                {
+                    float z = 4f + i * 6.6f;
+                    b.Box(mats.BuildingB, new Vector3(side * 7.62f, 2.3f, z), new Vector3(0.34f, 4.4f, 0.9f));
+                    b.Box(mats.WarmLamp, new Vector3(side * 7.42f, 2.5f, z), new Vector3(0.06f, 0.7f, 0.28f));
+                }
+                // Dune berms.
+                for (int i = 0; i < 4; i++)
+                {
+                    float z = 3f + i * 11f + rng.Range(-1.5f, 1.5f);
+                    b.Box(mats.Trim, new Vector3(side * (5.85f + rng.Range(0f, 0.7f)), 0.22f, z),
+                        new Vector3(1.5f, 0.44f, rng.Range(4.5f, 7.5f)),
+                        Quaternion.Euler(0f, rng.Range(-9f, 9f), side * -4f));
+                }
+                // Photovoltaic field tilted toward the sun.
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 8f + i * 11f;
+                    b.Box(mats.Metal, new Vector3(side * 10.6f, 1.1f, z), new Vector3(0.1f, 2.2f, 0.1f));
+                    b.Box(mats.NeonAlt, new Vector3(side * 10.6f, 2.5f, z), new Vector3(4.4f, 0.08f, 2.3f),
+                        Quaternion.Euler(0f, 0f, side * -22f));
+                    b.Box(mats.Trim, new Vector3(side * 10.6f, 2.35f, z - 1.05f), new Vector3(4.2f, 0.05f, 0.08f));
+                }
+                // Wind turbine with three blades.
+                if (rng.Chance(0.65f))
+                {
+                    float z = 18f + rng.Range(-6f, 8f);
+                    float x = side * 12.5f;
+                    b.Cylinder(mats.White, new Vector3(x, 4.4f, z), new Vector3(0.16f, 8.8f, 0.16f));
+                    b.Cylinder(mats.Metal, new Vector3(x, 8.7f, z), new Vector3(0.24f, 0.24f, 0.24f), Quaternion.Euler(90f, 0f, 0f));
+                    for (int blade = 0; blade < 3; blade++)
+                        b.Box(mats.White, new Vector3(x, 8.7f, z), new Vector3(0.1f, 3.2f, 0.34f),
+                            Quaternion.Euler(blade * 120f, 0f, 0f));
+                }
+                // Rock outcrops.
+                for (int i = 0; i < 2; i++)
+                    b.Foliage(mats.BuildingB, new Vector3(side * (9.7f + rng.Range(0f, 1.6f)), 0.35f, rng.Range(3f, 39f)),
+                        new Vector3(1.6f, 0.8f, 1.4f), Quaternion.Euler(0f, rng.Range(0f, 180f), 0f));
+            }
+            // Shade sail gantry.
+            b.Box(mats.Trim, new Vector3(0f, 6.6f, 23f), new Vector3(11.5f, 0.16f, 0.22f));
+            b.Quad(mats.White, new Vector3(0f, 6.2f, 22.4f), new Vector3(9.6f, 4.6f, 1f), Quaternion.Euler(90f, 0f, 0f));
+
+            // Hot-side signature: a massive cooling dish anchored outside the trench.
+            if (theme.id == "solar-arcology")
+            {
+                float ds = 26f;
+                for (int i = 0; i < 2; i++)
+                {
+                    float x = (i == 0 ? -1f : 1f) * 15.4f;
+                    b.Cylinder(mats.Metal, new Vector3(x, 0.8f, ds), new Vector3(1.3f, 1.6f, 1.3f));
+                    b.Cylinder(mats.White, new Vector3(x, 5.4f, ds), new Vector3(4.6f, 0.5f, 4.6f),
+                        Quaternion.Euler(i == 0 ? 24f : -24f, 0f, 0f));
+                    b.Cylinder(mats.Sand, new Vector3(x, 5.4f, ds + (i == 0 ? 2.1f : -2.1f)),
+                        new Vector3(4.7f, 0.12f, 4.7f), Quaternion.Euler(i == 0 ? 18f : -18f, 0f, 0f));
+                    b.Cylinder(mats.Neon, new Vector3(x, 6.7f, ds), new Vector3(0.5f, 1.4f, 0.5f));
+                }
+            }
+            else
+            {
+                // Dune-meridian: sandstone souk tents and teal-glass megablocks.
+                float ds = 24f;
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float z = 5f + i * 8.4f;
+                        float x = side * (11.6f + rng.Range(0f, 1.5f));
+                        b.Facade(mats.Sand, new Vector3(x, 2.6f, z), new Vector3(4.8f, 5.2f, 7.2f),
+                            new Vector2(i * 0.3f, 0.2f));
+                        b.Box(mats.NeonAlt, new Vector3(x - side * 2.42f, 3.4f, z),
+                            new Vector3(0.06f, 2.6f, 5f));
+                        b.Box(mats.Trim, new Vector3(x, 5.4f, z), new Vector3(5.2f, 0.35f, 7.6f));
+                    }
+                    // Palm row (curved trunk plus frond fans).
+                    for (int i = 0; i < 3; i++)
+                        AddPalm(b, mats, side, 7.8f + i * 12f, side * 6.6f, rng);
+                }
+                b.Box(mats.Sand, new Vector3(0f, 0.22f, ds - 22f), new Vector3(6.4f, 0.3f, 18f),
+                    Quaternion.Euler(0f, 7f, 0f));
+            }
+        }
+
+        /// <summary>
+        /// Curved-trunk palm with a five-frond fan. Cheap silhouette reads tropical at speed.
+        /// </summary>
+        private static void AddPalm(DecorMeshBuilder b, ThemeMaterials mats, int bend, float z, float x,
+            DeterministicRandom rng)
+        {
+            float lean = rail(bend, 0.35f);
+            b.Cylinder(mats.Bark, new Vector3(x + lean * 0.35f, 1.35f, z), new Vector3(0.17f, 2.7f, 0.17f),
+                Quaternion.Euler(0f, 0f, -lean * 32f));
+            b.Cylinder(mats.Bark, new Vector3(x + lean * 0.85f, 3.3f, z), new Vector3(0.12f, 1.6f, 0.12f),
+                Quaternion.Euler(0f, 0f, -lean * 46f));
+            for (int frond = 0; frond < 5; frond++)
+            {
+                float angle = frond / 5f * Mathf.PI * 2f;
+                b.Cylinder(mats.Foliage, new Vector3(x + lean * 1.15f, 3.95f, z),
+                    new Vector3(0.65f, 0.07f, 0.22f),
+                    Quaternion.Euler(0f, angle * Mathf.Rad2Deg, -22f + frond * 4f));
+            }
+        }
+
+        private static float rail(int side, float value) => side * value;
+
+        /// <summary>Coastal highway: water aprons, boardwalk rails, coral towers and a lighthouse.</summary>
+        private static void BuildCoast(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Animated-looking ocean panels beyond the service walk.
+                b.Box(mats.Puddle, new Vector3(side * 14.5f, -0.32f, half), new Vector3(17f, 0.07f, SegmentLength + 0.2f));
+                b.Box(mats.GroundDark, new Vector3(side * 7.1f, -0.2f, half), new Vector3(3.2f, 0.5f, SegmentLength));
+                // Boardwalk rails and pilings.
+                for (int i = 0; i < 8; i++)
+                {
+                    float z = 2.5f + i * 5.4f;
+                    b.Cylinder(mats.Bark, new Vector3(side * 6.35f, -0.2f, z), new Vector3(0.16f, 2.2f, 0.16f));
+                    b.Box(mats.Metal, new Vector3(side * 6.28f, 0.98f, z), new Vector3(0.1f, 0.1f, 5.4f));
+                }
+                b.Box(mats.Metal, new Vector3(side * 6.28f, 1.05f, half), new Vector3(0.13f, 0.06f, SegmentLength));
+                // Coral growths in the shallows.
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 6f + i * 12f + rng.Range(-2f, 2f);
+                    float x = side * (8.4f + rng.Range(0f, 2.2f));
+                    float h = rng.Range(1.2f, 2.8f);
+                    b.Cylinder(mats.NeonSoft, new Vector3(x, h * 0.5f - 0.1f, z), new Vector3(0.34f, h, 0.34f),
+                        Quaternion.Euler(rng.Range(-16f, 16f), 0f, rng.Range(-16f, 16f)));
+                    b.Cylinder(mats.FoliageLight, new Vector3(x + side * 0.4f, h * 0.34f, z + 0.4f),
+                        new Vector3(0.6f, h * 0.72f, 0.6f), Quaternion.Euler(rng.Range(-22f, 22f), 0f, 0f));
+                    b.Cylinder(mats.Neon, new Vector3(x, h + 0.06f, z), new Vector3(0.16f, 0.08f, 0.16f));
+                }
+                // Lighthouse silhouette on every other segment.
+                if (rng.Chance(0.5f))
+                {
+                    float z = 20f + rng.Range(-8f, 8f);
+                    float x = side * 14.4f;
+                    b.Cylinder(mats.White, new Vector3(x, 4.2f, z), new Vector3(1.15f, 8.4f, 1.15f));
+                    b.Cylinder(mats.NeonAlt, new Vector3(x, 8.5f, z), new Vector3(1.35f, 0.5f, 1.35f));
+                    b.Cylinder(mats.WarmLamp, new Vector3(x, 9.1f, z), new Vector3(0.9f, 0.75f, 0.9f));
+                    b.Cylinder(mats.Metal, new Vector3(x, 9.75f, z), new Vector3(1.0f, 0.2f, 1.0f));
+                }
+            }
+            // Salt-air footbridge and hanging lamps.
+            b.Box(mats.Metal, new Vector3(0f, 6.4f, 14f), new Vector3(10.5f, 0.14f, 0.16f));
+            for (int i = -2; i <= 2; i++)
+                b.Box(mats.NeonSoft, new Vector3(i * 2.1f, 6.05f, 14f), new Vector3(0.08f, 0.5f, 0.08f));
+
+            // Per-theme coastal identity so the three districts never read as recolours.
+            if (theme.id == "pacific-verge")
+            {
+                // Cliffhead strata palisades behind the guard rail.
+                for (int side2 = -1; side2 <= 1; side2 += 2)
+                {
+                    for (int i = 0; i < 4; i++)
+                    {
+                        float z = 3.6f + i * 9.4f;
+                        float x = side2 * (15.6f + rng.Range(0f, 1.8f));
+                        float h = 6.4f + i * 1.4f;
+                        b.Facade(mats.Rock, new Vector3(x, h * 0.5f - 0.6f, z),
+                            new Vector3(5.6f, h, 8.4f), new Vector2(0f, i * 0.22f));
+                        b.Box(mats.Rock, new Vector3(x * 0.86f, h * 0.82f, z),
+                            new Vector3(4.2f, h * 0.44f, 7.4f), Quaternion.Euler(0f, side2 * 5f, 0f));
+                        b.Foliage(mats.FoliageDark, new Vector3(x * 0.7f, h * 0.98f, z),
+                            new Vector3(2.6f, 0.9f, 2.6f), Quaternion.Euler(0f, i * 27f, 0f));
+                    }
+                }
+            }
+            else if (theme.id == "coral-expanse")
+            {
+                // Overwater stilt decks with thatched cabanas.
+                for (int side2 = -1; side2 <= 1; side2 += 2)
+                {
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float z = 6f + i * 11.5f;
+                        float x = side2 * (10.8f + rng.Range(0f, 1.4f));
+                        for (int post = -1; post <= 1; post += 2)
+                            b.Cylinder(mats.Bark, new Vector3(x + post * 2.1f, 0.2f, z + side2 * 1.6f),
+                                new Vector3(0.18f, 2.6f, 0.18f));
+                        b.Facade(mats.Wood, new Vector3(x, 1.7f, z), new Vector3(5f, 0.5f, 4.4f),
+                            new Vector2(i * 0.4f, 0f));
+                        b.Box(mats.Sign, new Vector3(x, 3.1f, z), new Vector3(4.2f, 2.4f, 4f),
+                            Quaternion.Euler(0f, side2 * 8f, 0f));
+                        b.Cylinder(mats.Rock, new Vector3(x, 3.6f, z), new Vector3(4.4f, 1.1f, 4.4f),
+                            Quaternion.Euler(0f, 0f, 0f));
+                        b.Box(mats.WarmLamp, new Vector3(x, 2.72f, z), new Vector3(3.4f, 0.06f, 3f));
+                    }
+                    AddPalm(b, mats, side2, 12f, side2 * 6.9f, rng);
+                }
+            }
+            else
+            {
+                // Monsoon-quay: working harbour with moored junk skiffs and coiled rope bollards.
+                for (int side2 = -1; side2 <= 1; side2 += 2)
+                {
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float z = 6.5f + i * 10.8f;
+                        float x = side2 * (12.6f + rng.Range(0f, 1.2f));
+                        b.Box(mats.Wood, new Vector3(x, 0.3f, z), new Vector3(2.1f, 0.6f, 5.6f),
+                            Quaternion.Euler(0f, side2 * 4f, 0f));
+                        b.Box(mats.Trim, new Vector3(x, 0.78f, z), new Vector3(1.7f, 0.32f, 5f));
+                        b.Box(mats.NeonAlt, new Vector3(x, 1.62f, z), new Vector3(0.08f, 0.5f, 0.4f));
+                        b.Box(mats.Wood, new Vector3(x + side2 * 1.3f, 1.9f, z + 1.4f),
+                            new Vector3(0.09f, 3.4f, 0.09f), Quaternion.Euler(0f, 0f, side2 * 8f));
+                        b.Foliage(mats.FoliageDark, new Vector3(x + side2 * 1.3f, 3.5f, z + 1.5f),
+                            new Vector3(1.1f, 0.16f, 0.65f), Quaternion.Euler(0f, side2 * 18f, 0f));
+                    }
+                    for (int boll = 0; boll < 3; boll++)
+                    {
+                        float z = 4f + boll * 13f;
+                        b.Cylinder(mats.Metal, new Vector3(side2 * 6.5f, 0.24f, z),
+                            new Vector3(0.22f, 0.5f, 0.22f));
+                        b.Foliage(mats.Bark, new Vector3(side2 * 6.34f, 0.4f, z),
+                            new Vector3(0.34f, 0.14f, 0.34f));
+                    }
+                }
+            }
+        }
+
+        /// <summary>Forest research overpass: canopy trunks, ferns, logs and a glass lab front.</summary>
+        private static void BuildForest(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Glass-walled research frontage set behind the treeline.
+                b.Box(mats.BuildingB, new Vector3(side * 8.7f, 1.9f, half), new Vector3(1.4f, 3.8f, SegmentLength));
+                for (int i = 0; i < 5; i++)
+                {
+                    float z = 5f + i * 8f;
+                    b.Box(mats.NeonSoft, new Vector3(side * 7.94f, 1.8f, z), new Vector3(0.06f, 1.5f, 2.6f));
+                    b.Box(mats.Trim, new Vector3(side * 7.88f, 1.8f, z), new Vector3(0.06f, 1.6f, 0.08f));
+                }
+                // Old-growth trunks and layered canopies.
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 5f + i * 13.2f + rng.Range(-2f, 2f);
+                    float x = side * (6.9f + rng.Range(0f, 2.8f));
+                    float h = rng.Range(5.6f, 9.4f);
+                    b.Cylinder(mats.Bark, new Vector3(x, h * 0.5f, z), new Vector3(0.36f, h, 0.36f));
+                    b.Cylinder(mats.Bark, new Vector3(x - side * 0.25f, h * 0.55f, z + 0.4f),
+                        new Vector3(0.1f, 2.2f, 0.1f), Quaternion.Euler(24f, 0f, side * 18f));
+                    b.Foliage(mats.Foliage, new Vector3(x, h + 0.5f, z),
+                        new Vector3(3.4f, 1.8f, 3.4f), Quaternion.Euler(0f, i * 41f, 0f));
+                    b.Foliage(mats.FoliageDark, new Vector3(x + side * 0.9f, h - 0.5f, z - 0.8f),
+                        new Vector3(2.4f, 1.3f, 2.4f));
+                    b.Foliage(mats.FoliageLight, new Vector3(x - side * 0.7f, h + 1.15f, z + 0.7f),
+                        new Vector3(2.1f, 1.1f, 2.1f));
+                }
+                // Ferns and undergrowth between the rail and trees.
+                for (int i = 0; i < 6; i++)
+                    b.Foliage(mats.FoliageDark, new Vector3(side * (5.5f + rng.Range(0f, 0.8f)), 0.34f,
+                        rng.Range(2f, 40f)), new Vector3(rng.Range(0.5f, 1.1f), 0.55f, rng.Range(0.5f, 1.2f)));
+                // Fallen log.
+                if (rng.Chance(0.55f))
+                    b.Cylinder(mats.Bark, new Vector3(side * 7.4f, 0.45f, 18f + rng.Range(-4f, 6f)),
+                        new Vector3(0.42f, 3.2f, 0.42f), Quaternion.Euler(0f, 0f, 90f));
+                // Bio-luminescent strip on the research wall.
+                b.Box(mats.Neon, new Vector3(side * 7.86f, 3.55f, half), new Vector3(0.05f, 0.06f, SegmentLength));
+            }
+            // Canopy bridge with hanging vines.
+            b.Box(mats.Bark, new Vector3(0f, 8.1f, 21f), new Vector3(12.6f, 0.42f, 0.6f));
+            for (int i = -2; i <= 2; i++)
+                b.Cylinder(mats.FoliageDark, new Vector3(i * 2.4f, 7.25f, 21f), new Vector3(0.08f, 1.5f, 0.08f));
+
+            // Verdant-grid signature: glass research dome and canopy sensor towers.
+            float domeZ = 27f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                b.Cylinder(mats.BuildingB, new Vector3(side * 12.8f, 1.65f, domeZ),
+                    new Vector3(4.6f, 1.65f, 4.6f));
+                b.Foliage(mats.NeonSoft, new Vector3(side * 12.8f, 3.6f, domeZ),
+                    new Vector3(4.7f, 2.5f, 4.7f));
+                b.Cylinder(mats.Trim, new Vector3(side * 12.8f, 5.4f, domeZ),
+                    new Vector3(0.22f, 1.2f, 0.22f));
+                b.Box(mats.Neon, new Vector3(side * 12.8f, 6.2f, domeZ), new Vector3(0.3f, 0.1f, 0.3f));
+                // Canopy observation tower climbing above the treeline.
+                float tz = 16f;
+                b.Cylinder(mats.Metal, new Vector3(side * 10.4f, 4.2f, tz), new Vector3(0.4f, 4.2f, 0.4f));
+                b.Box(mats.White, new Vector3(side * 10.4f, 8.9f, tz), new Vector3(2f, 1.5f, 2f));
+                b.Box(mats.Trim, new Vector3(side * 10.4f, 9.8f, tz), new Vector3(2.2f, 0.14f, 2.2f));
+                b.Box(mats.Neon, new Vector3(side * 10.4f, 8.9f, tz), new Vector3(0.12f, 1.1f, 0.12f));
+                b.Box(mats.Neon, new Vector3(side * 10.4f, 10.1f, tz), new Vector3(0.9f, 0.05f, 0.9f));
+            }
+        }
+
+        /// <summary>European promenade: colonnades, cornices, domes and warm plaza lamps.</summary>
+        private static void BuildEuropean(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Stone block with arched shopfronts.
+                b.Box(mats.Podium, new Vector3(side * 9.1f, 2.5f, half), new Vector3(2.6f, 5f, SegmentLength));
+                for (int i = 0; i < 4; i++)
+                {
+                    float z = 6f + i * 10f;
+                    b.Box(mats.Shop, new Vector3(side * 7.72f, 1.7f, z), new Vector3(0.08f, 2.2f, 2.0f));
+                    b.Box(mats.Trim, new Vector3(side * 7.66f, 2.9f, z), new Vector3(0.16f, 0.22f, 2.4f));
+                    b.Box(mats.WarmGlow, new Vector3(side * 7.64f, 0.55f, z), new Vector3(0.02f, 0.1f, 1.8f));
+                }
+                // Colonnade along the sidewalk edge.
+                for (int i = 0; i < 5; i++)
+                {
+                    float z = 4f + i * 8.4f;
+                    b.Cylinder(mats.Trim, new Vector3(side * 6.6f, 2.2f, z), new Vector3(0.34f, 4.4f, 0.34f));
+                    b.Box(mats.Podium, new Vector3(side * 6.6f, 0.16f, z), new Vector3(0.7f, 0.32f, 0.7f));
+                    b.Box(mats.Trim, new Vector3(side * 6.6f, 4.32f, z), new Vector3(0.62f, 0.2f, 0.62f));
+                }
+                b.Box(mats.Trim, new Vector3(side * 6.6f, 4.62f, half), new Vector3(0.85f, 0.4f, SegmentLength));
+                b.Box(mats.Podium, new Vector3(side * 6.6f, 4.92f, half), new Vector3(1.1f, 0.22f, SegmentLength));
+                // Plaza lamps.
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 8f + i * 12f;
+                    b.Cylinder(mats.Metal, new Vector3(side * 5.55f, 1.65f, z), new Vector3(0.1f, 3.3f, 0.1f));
+                    b.Box(mats.WarmLamp, new Vector3(side * 5.55f, 3.45f, z), new Vector3(0.42f, 0.55f, 0.42f));
+                    b.Box(mats.Metal, new Vector3(side * 5.55f, 3.78f, z), new Vector3(0.55f, 0.1f, 0.55f));
+                }
+                // Domed pavilion every other segment.
+                if (rng.Chance(0.55f))
+                {
+                    float z = 24f + rng.Range(-8f, 6f);
+                    b.Cylinder(mats.Podium, new Vector3(side * 10.8f, 2.2f, z), new Vector3(1.8f, 4.4f, 1.8f));
+                    b.Cylinder(mats.Trim, new Vector3(side * 10.8f, 4.5f, z), new Vector3(2.15f, 0.32f, 2.15f));
+                    b.Foliage(mats.WarmLamp, new Vector3(side * 10.8f, 5.3f, z), new Vector3(2.0f, 1.2f, 2.0f));
+                    b.Box(mats.NeonSoft, new Vector3(side * 10.8f, 6.35f, z), new Vector3(0.18f, 0.7f, 0.18f));
+                }
+            }
+            // Festoon lights across the promenade.
+            for (int i = -3; i <= 3; i++)
+                b.Box(mats.WarmLamp, new Vector3(i * 1.55f, 6.15f + Mathf.Abs(i) * 0.06f, 17f),
+                    new Vector3(0.07f, 0.07f, 0.07f));
+            b.Box(mats.Metal, new Vector3(0f, 6.05f, 17f), new Vector3(10.2f, 0.03f, 0.03f));
+
+            // Pair identity split: continental data promenade vs mountain divide viaduct.
+            if (theme.id == "eurodyne-spire")
+            {
+                // Glass atria with warm atrium cores along the plaza back edge.
+                for (int side2 = -1; side2 <= 1; side2 += 2)
+                {
+                    for (int i = 0; i < 2; i++)
+                    {
+                        float z = 12f + i * 17f;
+                        float x = side2 * (10.9f + rng.Range(0f, 1f));
+                        b.Box(mats.BuildingB, new Vector3(x, 2.1f, z), new Vector3(4.6f, 4.2f, 6.6f));
+                        b.Box(mats.Trim, new Vector3(x, 4.35f, z), new Vector3(5f, 0.34f, 7f));
+                        b.Box(mats.WarmLamp, new Vector3(x - side2 * 2.33f, 2f, z),
+                            new Vector3(0.05f, 2f, 5f));
+                        b.Box(mats.NeonSoft, new Vector3(x - side2 * 2.33f, 3.6f, z),
+                            new Vector3(0.04f, 0.06f, 5f));
+                    }
+                    // Suspended tram wires with hanging city lamps.
+                    for (int w = 0; w < 4; w++)
+                    {
+                        float z = 5.5f + w * 9.5f;
+                        b.Cylinder(mats.Metal, new Vector3(side2 * 7.4f, 4.2f, z),
+                            new Vector3(0.09f, 4.2f, 0.09f));
+                        b.Cylinder(mats.Metal, new Vector3(side2 * 4.6f, 3f, z),
+                            new Vector3(0.06f, 3f, 0.06f));
+                        b.Box(mats.Metal, new Vector3(side2 * 6f, 8.3f, z),
+                            new Vector3(5.6f, 0.05f, 0.05f));
+                        b.Box(mats.WarmLamp, new Vector3(side2 * 6f, 7.9f, z),
+                            new Vector3(0.22f, 0.3f, 0.22f));
+                    }
+                }
+            }
+            else
+            {
+                // Aurora pass: cut-rock faces with snow caps and relay masts with dishes.
+                for (int side2 = -1; side2 <= 1; side2 += 2)
+                {
+                    for (int i = 0; i < 3; i++)
+                    {
+                        float z = 5f + i * 13f;
+                        float x = side2 * (14.6f + rng.Range(0f, 2.2f));
+                        float h = 8.4f + i * 1.8f;
+                        b.Facade(mats.Rock, new Vector3(x, h * 0.5f - 1f, z),
+                            new Vector3(7f, h, 10.5f), new Vector2(0f, i * 0.2f));
+                        b.Box(mats.Snow, new Vector3(x, h - 0.85f, z),
+                            new Vector3(7.2f, 0.7f, 10.7f), Quaternion.Euler(0f, 0f, side2 * -5f));
+                        b.Foliage(mats.FoliageDark, new Vector3(x * 0.78f, h * 0.92f - 0.5f, z),
+                            new Vector3(2.8f, 1f, 2.8f), Quaternion.Euler(0f, i * 31f, 0f));
+                    }
+                    for (int m = 0; m < 2; m++)
+                    {
+                        float z = 10f + m * 21f;
+                        float x = side2 * (11.8f + m * 1.1f);
+                        b.Box(mats.Metal, new Vector3(x, 0.25f, z), new Vector3(0.8f, 0.5f, 0.8f));
+                        b.Cylinder(mats.Metal, new Vector3(x, 3.4f, z), new Vector3(0.22f, 3.4f, 0.22f));
+                        b.Cylinder(mats.White, new Vector3(x, 6.75f, z), new Vector3(1.3f, 0.34f, 1.3f),
+                            Quaternion.Euler(38f, m * 74f, 0f));
+                        b.Box(mats.Neon, new Vector3(x, 7.05f, z), new Vector3(0.2f, 0.1f, 0.2f));
+                        b.Box(mats.NeonAlt, new Vector3(x, 0.9f, z), new Vector3(0.08f, 1.4f, 0.08f));
+                    }
+                }
+                for (int side = -1; side <= 1; side += 2)
+                    b.Box(mats.Snow, new Vector3(side * 6.5f, 0.13f, 27f), new Vector3(2.4f, 0.24f, 8.5f),
+                        Quaternion.Euler(0f, 6f, 0f));
+            }
+        }
+
+        /// <summary>Volcanic freight line: basalt columns, lava fissures and furnace vents.</summary>
+        private static void BuildVolcanic(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Lava glow trenches sit on the service walk, outside the collision lane.
+                for (int i = 0; i < 5; i++)
+                {
+                    float z = 3f + i * 8.4f + rng.Range(-1.4f, 1.4f);
+                    b.Box(mats.WarmGlow, new Vector3(side * 5.55f, 0.026f, z),
+                        new Vector3(0.85f, 0.012f, rng.Range(2.4f, 5.2f)),
+                        Quaternion.Euler(0f, rng.Range(-16f, 16f), 0f));
+                    b.Box(mats.Trim, new Vector3(side * 5.05f, 0.14f, z), new Vector3(0.12f, 0.28f, 6f));
+                }
+                // Basalt colonnade.
+                for (int i = 0; i < 5; i++)
+                {
+                    float z = 5f + i * 8f;
+                    float h = rng.Range(3.4f, 7.8f);
+                    b.Cylinder(mats.BuildingB, new Vector3(side * 7.2f, h * 0.5f, z),
+                        new Vector3(0.78f, h, 0.78f), Quaternion.Euler(0f, i * 23f, 0f));
+                    b.Box(mats.NeonAlt, new Vector3(side * 7.2f, h + 0.2f, z), new Vector3(0.9f, 0.4f, 0.9f));
+                }
+                // Furnace vent with a hot cap and chimney.
+                for (int i = 0; i < 2; i++)
+                {
+                    float z = 12f + i * 20f;
+                    b.Cylinder(mats.Metal, new Vector3(side * 10.2f, 2.4f, z), new Vector3(1.5f, 4.8f, 1.5f));
+                    b.Cylinder(mats.WarmLamp, new Vector3(side * 10.2f, 4.9f, z), new Vector3(1.65f, 0.2f, 1.65f));
+                    b.Box(mats.GroundDark, new Vector3(side * 10.2f, 7.1f, z), new Vector3(0.7f, 4.2f, 0.7f));
+                }
+                // Ash drifts.
+                for (int i = 0; i < 4; i++)
+                    b.Foliage(mats.GroundDark, new Vector3(side * (6.3f + rng.Range(0f, 0.8f)), 0.2f,
+                        rng.Range(2f, 40f)), new Vector3(rng.Range(1f, 2f), 0.35f, rng.Range(1.2f, 2.4f)));
+            }
+            // Ore gantry with warning beacons.
+            b.Box(mats.Metal, new Vector3(0f, 7.2f, 20f), new Vector3(13.4f, 0.4f, 0.5f));
+            for (int i = -3; i <= 3; i++)
+                b.Box(i == 0 ? mats.WarmLamp : mats.NeonAlt, new Vector3(i * 1.7f, 6.92f, 20f),
+                    new Vector3(0.16f, 0.16f, 0.1f));
+        }
+
+        /// <summary>Japanese neon expressway: torii portals, pagoda roofs, lanterns and cherry trees.</summary>
+        private static void BuildJapanese(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {
+            float half = SegmentLength * 0.5f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Low timber frontage with shoji panels and deep eaves.
+                b.Box(mats.BuildingA, new Vector3(side * 8.6f, 1.8f, half), new Vector3(2.1f, 3.6f, SegmentLength));
+                for (int i = 0; i < 5; i++)
+                {
+                    float z = 4.5f + i * 8f;
+                    b.Box(mats.WarmLamp, new Vector3(side * 7.5f, 1.75f, z), new Vector3(0.06f, 1.5f, 2.2f));
+                    b.Box(mats.GroundDark, new Vector3(side * 7.44f, 1.75f, z), new Vector3(0.04f, 1.7f, 0.1f));
+                    b.Box(mats.GroundDark, new Vector3(side * 7.44f, 2.5f, z), new Vector3(0.08f, 0.1f, 2.4f));
+                }
+                b.Box(mats.Roof, new Vector3(side * 7.9f, 3.72f, half), new Vector3(2.6f, 0.28f, SegmentLength + 0.4f),
+                    Quaternion.Euler(0f, 0f, side * 8f));
+                // Stone lanterns.
+                for (int i = 0; i < 3; i++)
+                {
+                    float z = 7f + i * 12.5f;
+                    b.Box(mats.Trim, new Vector3(side * 5.6f, 0.75f, z), new Vector3(0.32f, 1.5f, 0.32f));
+                    b.Box(mats.WarmLamp, new Vector3(side * 5.6f, 1.65f, z), new Vector3(0.46f, 0.4f, 0.46f));
+                    b.Box(mats.Roof, new Vector3(side * 5.6f, 1.94f, z), new Vector3(0.72f, 0.16f, 0.72f));
+                }
+                // Cherry trees with layered blossom canopies.
+                for (int i = 0; i < 2; i++)
+                {
+                    float z = 10f + i * 20f + rng.Range(-2f, 2f);
+                    float x = side * (9.3f + rng.Range(0f, 1.8f));
+                    b.Cylinder(mats.Bark, new Vector3(x, 1.9f, z), new Vector3(0.26f, 3.8f, 0.26f));
+                    b.Cylinder(mats.Bark, new Vector3(x - side * 0.5f, 2.8f, z + 0.3f),
+                        new Vector3(0.1f, 1.8f, 0.1f), Quaternion.Euler(0f, 0f, side * 34f));
+                    b.Foliage(mats.SignAlt, new Vector3(x, 4.2f, z), new Vector3(3.2f, 1.5f, 3.2f),
+                        Quaternion.Euler(0f, i * 44f, 0f));
+                    b.Foliage(mats.NeonAlt, new Vector3(x + side * 0.8f, 4.7f, z - 0.6f),
+                        new Vector3(2.0f, 1.0f, 2.0f));
+                }
+                // Pagoda silhouette.
+                if (rng.Chance(0.6f))
+                {
+                    float z = 22f + rng.Range(-7f, 6f);
+                    float x = side * 11.4f;
+                    for (int tier = 0; tier < 3; tier++)
+                    {
+                        float y = 1.4f + tier * 2.2f;
+                        float w = 3.4f - tier * 0.7f;
+                        b.Box(mats.BuildingA, new Vector3(x, y, z), new Vector3(w, 2.0f, w));
+                        b.Box(mats.Roof, new Vector3(x, y + 1.15f, z), new Vector3(w + 1.1f, 0.26f, w + 1.1f),
+                            Quaternion.Euler(0f, tier * 45f, 0f));
+                        b.Box(mats.WarmLamp, new Vector3(x, y + 0.2f, z - w * 0.5f), new Vector3(w * 0.4f, 0.5f, 0.05f));
+                    }
+                    b.Box(mats.Neon, new Vector3(x, 7.7f, z), new Vector3(0.1f, 1.2f, 0.1f));
+                }
+            }
+            // Torii portal over the road, high enough to clear the runner and camera.
+            float toriiZ = 16f + rng.Range(-2f, 4f);
+            for (int side = -1; side <= 1; side += 2)
+            {
+                b.Box(mats.NeonAlt, new Vector3(side * 5.45f, 2.9f, toriiZ), new Vector3(0.34f, 5.8f, 0.34f));
+                b.Box(mats.Roof, new Vector3(side * 5.45f, 0.18f, toriiZ), new Vector3(0.5f, 0.36f, 0.5f));
+            }
+            b.Box(mats.NeonAlt, new Vector3(0f, 5.95f, toriiZ), new Vector3(12.2f, 0.34f, 0.42f));
+            b.Box(mats.Roof, new Vector3(0f, 6.28f, toriiZ), new Vector3(13.2f, 0.22f, 0.62f));
+            b.Box(mats.NeonAlt, new Vector3(0f, 5.0f, toriiZ), new Vector3(9.4f, 0.26f, 0.3f));
+
+            // Pair identity split: petal-cloud mountain pass vs dense lantern alley.
+            if (theme.id == "sakura-circuit")
+            {
+                // Mount silhouette behind the treeline; the road threads a mountain pass.
+                for (int side2 = -1; side2 <= 1; side2 += 2)
+                {
+                    float bx = side2 * 17.5f;
+                    b.Facade(mats.Rock, new Vector3(bx, 5.4f, half), new Vector3(9f, 13f, SegmentLength + 2f),
+                        new Vector2(0.1f, 0.4f));
+                    b.Box(mats.Snow, new Vector3(bx, 12.1f, half), new Vector3(9.2f, 0.9f, SegmentLength + 2f),
+                        Quaternion.Euler(0f, 0f, side2 * -6f));
+                }
+                // Drifting petals suspended over the tree berms, clear of the runner lanes.
+                for (int petal = 0; petal < 6; petal++)
+                {
+                    int side2 = petal % 2 == 0 ? -1 : 1;
+                    b.Foliage(mats.SignAlt, new Vector3(side2 * rng.Range(5.7f, 7.6f), rng.Range(1.6f, 5.4f),
+                            2f + petal * 6.4f),
+                        new Vector3(0.16f, 0.05f, 0.05f), Quaternion.Euler(petal * 40f, petal * 24f, 0f));
+                }
+            }
+            else
+            {
+                // Hanging lantern strands across the frontage and stacked vending cabinets.
+                for (int side2 = -1; side2 <= 1; side2 += 2)
+                {
+                    float strandY = 4.35f;
+                    b.Box(mats.Metal, new Vector3(side2 * 2.7f, strandY, half), new Vector3(5.6f, 0.05f, 0.05f));
+                    for (int lamp = 0; lamp < 4; lamp++)
+                    {
+                        float z = 7.4f + lamp * 9.6f;
+                        b.Box(mats.NeonAlt, new Vector3(side2 * 3.3f, strandY - 0.14f, z),
+                            new Vector3(0.16f, 0.5f, 0.16f));
+                        b.Cylinder(mats.WarmLamp, new Vector3(side2 * 2.7f, strandY - 0.42f, z),
+                            new Vector3(0.2f, 0.34f, 0.2f));
+                    }
+                    // Tight vertical banner forestry — the neon-brick alley wall.
+                    for (int pole = 0; pole < 4; pole++)
+                    {
+                        float z = 4.8f + pole * 8.2f;
+                        b.Box(mats.Metal, new Vector3(side2 * 5.95f, 2.5f, z),
+                            new Vector3(0.09f, 5f, 0.09f));
+                        b.Box(mats.Sign, new Vector3(side2 * 5.78f, 2.9f, z),
+                            new Vector3(0.06f, 3.4f, 0.75f));
+                        b.Box(mats.NeonSoft, new Vector3(side2 * 5.74f, 1.1f, z),
+                            new Vector3(0.05f, 0.9f, 0.5f));
+                    }
+                }
+            }
+        }
+
+        private static void BuildReactor(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
+        {            float half = SegmentLength * 0.5f;
             for (int side = -1; side <= 1; side += 2)
             {
                 // Concrete hazard wall with steel ribs and warning lamps.
@@ -978,6 +2775,45 @@ namespace NeonVelocity.World
             b.Box(mats.Metal, new Vector3(0f, 7.4f, 18f), new Vector3(15f, 0.35f, 0.4f));
             b.Box(mats.Neon, new Vector3(0f, 7.15f, 18f), new Vector3(10f, 0.06f, 0.1f));
             b.Box(mats.Sign, new Vector3(0f, 6.6f, 18f), new Vector3(4.2f, 1.4f, 0.08f));
+
+            // Reactor-belt signature: hyperboloid cooling tower, vent stacks and a robot
+            // assembly cell. The tower looms past the wall so verticals stop at venetian height.
+            float towerZ = 30f;
+            for (int side = -1; side <= 1; side += 2)
+            {
+                // Steam vent stack with valve wheels on the shoulder line.
+                float vz = 9f + (side > 0 ? 25f : 0f);
+                b.Cylinder(mats.Metal, new Vector3(side * 11.6f, 3f, vz), new Vector3(1.35f, 3f, 1.35f));
+                b.Cylinder(mats.WarmGlow, new Vector3(side * 11.6f, 6.2f, vz), new Vector3(1.1f, 0.4f, 1.1f));
+                b.Cylinder(mats.NeonSoft, new Vector3(side * 11.6f, 6.4f, vz), new Vector3(0.9f, 0.06f, 0.9f));
+                b.Cylinder(mats.Metal, new Vector3(side * 10.6f, 2.2f, vz + 3.4f),
+                    new Vector3(0.2f, 2.2f, 0.2f));
+                b.Cylinder(mats.Trim, new Vector3(side * 10.6f, 3.4f, vz + 2.1f),
+                    new Vector3(0.5f, 0.05f, 0.5f), Quaternion.Euler(0f, 0f, 90f));
+
+                // Robot assembly cell: stacked chassis shells on a conveyor spine.
+                float rz = 19f;
+                b.Box(mats.Metal, new Vector3(side * 8.9f, 0.8f, rz), new Vector3(0.3f, 1.6f, 9f));
+                for (int shell = 0; shell < 3; shell++)
+                {
+                    float z = rz - 3f + shell * 3f;
+                    b.Box(mats.BuildingB, new Vector3(side * 8.9f, 1.35f, z), new Vector3(1.15f, 0.9f, 1.6f),
+                        Quaternion.Euler(0f, 0f, shell % 2 == 0 ? 3f : -3f));
+                    b.Box(mats.Neon, new Vector3(side * 8.35f, 1.35f, z), new Vector3(0.05f, 0.4f, 0.16f));
+                }
+                b.Cylinder(mats.Paint, new Vector3(side * 8.9f, 1.85f, rz),
+                    new Vector3(0.4f, 0.45f, 0.4f), Quaternion.Euler(0f, 0f, 90f));
+            }
+            // Cooling tower pair rising past the hazard walls: pale shell, waist, hot rim.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                float x = side * 15.2f;
+                b.Cylinder(mats.BuildingA, new Vector3(x, 4f, towerZ), new Vector3(5.4f, 4f, 5.4f));
+                b.Cylinder(mats.BuildingA, new Vector3(x, 9.2f, towerZ), new Vector3(4.2f, 2.5f, 4.2f));
+                b.Cylinder(mats.BuildingA, new Vector3(x, 12.2f, towerZ), new Vector3(4.8f, 0.6f, 4.8f));
+                b.Cylinder(mats.NeonSoft, new Vector3(x, 12.6f, towerZ), new Vector3(4.4f, 0.08f, 4.4f));
+                b.Cylinder(mats.WarmGlow, new Vector3(x, 13.8f, towerZ), new Vector3(2.8f, 0.5f, 2.8f));
+            }
         }
 
         private static void BuildTunnel(DecorMeshBuilder b, ThemeMaterials mats, ThemeDefinition theme, DeterministicRandom rng)
@@ -1072,6 +2908,43 @@ namespace NeonVelocity.World
                 b.Quad(mats.WetGlow, new Vector3(side * 5.25f, 0.374f, 38f),
                     new Vector3(1.1f, 2.8f, 1f), Quaternion.Euler(90f, 0f, 0f));
             }
+
+            // Obsidian-line signature: wall-mounted signal heads, emergency bays and
+            // kilometre plates. Everything is inset into the existing walls and ribs.
+            for (int i = 0; i < 3; i++)
+            {
+                float z = 9f + i * 12f;
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    // Signal head: black case, red aspect, bracket sunk into the rib face.
+                    b.Box(mats.GroundDark, new Vector3(side * 5.72f, 4.5f, z),
+                        new Vector3(0.3f, 0.85f, 0.3f));
+                    b.Box(mats.Neon, new Vector3(side * 5.86f, 4.5f, z),
+                        new Vector3(0.05f, 0.22f, 0.22f), Quaternion.Euler(90f, 0f, 0f));
+                    b.Box(mats.NeonAlt, new Vector3(side * 5.86f, 4.22f, z),
+                        new Vector3(0.04f, 0.1f, 0.5f));
+                }
+            }
+            // Emergency phone/fire bays on alternating walls with painted backboards.
+            for (int i = 0; i < 2; i++)
+            {
+                float z = 16f + i * 15f;
+                int side = i % 2 == 0 ? -1 : 1;
+                b.Box(mats.GroundDark, new Vector3(side * 5.9f, 1.7f, z), new Vector3(0.5f, 1.7f, 1.1f));
+                b.Box(mats.Paint, new Vector3(side * 5.61f, 1.7f, z), new Vector3(0.08f, 1.3f, 0.8f));
+                b.Box(mats.Neon, new Vector3(side * 5.57f, 2.2f, z), new Vector3(0.05f, 0.16f, 0.4f));
+                b.Quad(mats.WetGlow, new Vector3(side * 5.36f, 0.38f, z),
+                    new Vector3(0.9f, 1.9f, 1f), Quaternion.Euler(90f, 0f, 0f));
+            }
+            // Kilometre plates on the column line, plus a painted ceiling centre band.
+            for (int i = 0; i < 4; i++)
+            {
+                float z = 6f + i * 10f;
+                int side = i % 2 == 0 ? 1 : -1;
+                b.Box(mats.White, new Vector3(side * 5.73f, 3.6f, z), new Vector3(0.05f, 0.4f, 0.55f));
+                b.Box(mats.Neon, new Vector3(side * 5.7f, 3.6f, z), new Vector3(0.06f, 0.3f, 0.05f));
+            }
+            b.Box(mats.NeonSoft, new Vector3(0f, 6.47f, half), new Vector3(3.2f, 0.03f, SegmentLength));
         }
 
         private static void BuildGateway(DecorMeshBuilder b, ThemeMaterials mats, DeterministicRandom rng)
@@ -1100,6 +2973,8 @@ namespace NeonVelocity.World
         {
             var plan = segment.Plan;
             var rng = new DeterministicRandom(plan.Seed ^ 0x0BADC0DE);
+            int hazardBias = LocationCatalog.Get(plan.BiomeIndex).hazardBias;
+            var junction = plan.Junction;
             for (int r = 0; r < plan.Rows.Length; r++)
             {
                 var row = plan.Rows[r];
@@ -1108,7 +2983,9 @@ namespace NeonVelocity.World
                 {
                     CellKind cell = row[lane];
                     if (cell == CellKind.Empty) continue;
-                    float x = LaneMath.LaneToX(lane);
+                    if (JunctionSuppressesCell(junction, r, lane)) continue;
+                    float x = LaneMath.LaneToX(lane) +
+                              JunctionRules.RouteOffsetAt(junction, z, lane);
                     ObstacleKind kind;
                     float width = 2.08f, depth = 1.0f, minY = 0f, maxY = 1f;
                     float move = 0f, speed = 0f, phase = 0f, spin = 0f;
@@ -1128,18 +3005,145 @@ namespace NeonVelocity.World
                             break;
                         case CellKind.MovingBlocker:
                             kind = ObstacleKind.MovingBlocker; depth = 1.1f; minY = 0f; maxY = 2.0f;
-                            move = 0.55f; speed = 0.9f; phase = rng.Range(0f, 6.28f);
+                            move = 0.55f; speed = 0.78f + hazardBias * 0.1f;
+                            phase = rng.Range(0f, 6.28f);
                             break;
                         default: // Solid
-                            if (rng.Chance(0.3f)) { kind = ObstacleKind.LaserWall; depth = 0.65f; minY = 0f; maxY = 2.35f; }
-                            else { kind = ObstacleKind.CargoCrate; depth = 1.7f; minY = 0f; maxY = 1.92f; }
-                            if (rng.Chance(0.12f)) { kind = ObstacleKind.RotatingBar; depth = 2.0f; minY = 0f; maxY = 2.25f; spin = 140f; }
+                            float laserChance = 0.30f + (hazardBias >= 3 ? 0.12f : 0f);
+                            if (rng.Chance(laserChance) || hazardBias >= 4)
+                            {
+                                kind = ObstacleKind.LaserWall; depth = 0.65f; minY = 0f; maxY = 2.35f;
+                            }
+                            else
+                            {
+                                kind = ObstacleKind.CargoCrate; depth = 1.7f; minY = 0f; maxY = 1.92f;
+                            }
+                            if (rng.Chance(0.12f + hazardBias * 0.015f))
+                            {
+                                kind = ObstacleKind.RotatingBar; depth = 2.0f; minY = 0f; maxY = 2.25f;
+                                spin = 120f + hazardBias * 12f;
+                            }
                             break;
                     }
                     var obstacle = _obstaclePool.Spawn(kind, segment.Root.transform,
                         new Vector3(x, 0f, z), lane, width, depth, minY, maxY, move, speed, phase, spin);
                     segment.Obstacles.Add(obstacle);
                 }
+            }
+            SpawnJunctionHazards(segment, junction);
+            SpawnSignatureHazard(segment, rng);
+        }
+
+        /// <summary>
+        /// Event-only signature hazards. They are placed on a row that is empty across the
+        /// full width and whose neighbours are empty, so a train, vehicle, drop or platform can
+        /// never combine with a lane action the player has not seen yet. Chance scales with the
+        /// director's difficulty tier; the base run still keeps long quiet stretches.
+        /// </summary>
+        private void SpawnSignatureHazard(Segment segment, DeterministicRandom rng)
+        {
+            var plan = segment.Plan;
+            if (plan.Junction != null || plan.IsSafe || !plan.IsEvent) return;
+            float chance = Mathf.Min(0.46f, 0.16f + plan.DifficultyTier * 0.035f);
+            if (!rng.Chance(chance)) return;
+            int row = HazardRules.FindSignatureRow(plan.Rows);
+            if (row < 0) return;
+            float z = row * RowSpacing + RowSpacing * 0.5f;
+            int pick = rng.Range(0, 4);
+            int lane = rng.Range(0, LaneMath.LaneCount);
+            float phase = rng.Range(0f, 6.28f);
+            Obstacle hazard;
+            switch (pick)
+            {
+                case 0:
+                    hazard = _obstaclePool.Spawn(ObstacleKind.MaglevTrain, segment.Root.transform,
+                        new Vector3(0f, 0f, z), 1, 2.5f, 3.7f, 0f, 2.35f, 7.8f, 0.55f, phase);
+                    break;
+                case 1:
+                    hazard = _obstaclePool.Spawn(ObstacleKind.TrafficVehicle, segment.Root.transform,
+                        new Vector3(LaneMath.LaneToX(lane), 0f, z), lane, 2.0f, 2.4f, 0f, 1.7f,
+                        3.4f, 1.15f, phase);
+                    break;
+                case 2:
+                    hazard = _obstaclePool.Spawn(ObstacleKind.FallingDebris, segment.Root.transform,
+                        new Vector3(LaneMath.LaneToX(lane), 4.4f, z), lane, 1.6f, 1.5f,
+                        -0.82f, 0.82f, 0f, 0f, phase, 0.55f);
+                    break;
+                default:
+                    hazard = _obstaclePool.Spawn(ObstacleKind.MovingPlatform, segment.Root.transform,
+                        new Vector3(LaneMath.LaneToX(lane), 0f, z), lane, 2.1f, 2.5f, 0f, 1.2f,
+                        3.2f, 0.6f, phase);
+                    break;
+            }
+            segment.Obstacles.Add(hazard);
+        }
+
+        private static bool JunctionSuppressesCell(JunctionPlan junction, int row, int lane)
+        {
+            if (junction == null) return false;
+            if (junction.IsShortcut && junction.IsBranchRow(row) && lane == junction.RewardLane) return true;
+            if (junction.IsMedianRow(row)) return lane == 1;
+            if (junction.IsNarrowRow(row)) return lane != 1;
+            if (junction.IsBrokenRoad) return row == 2;
+            return false;
+        }
+
+        /// <summary>
+        /// Spawns the continuous collision surfaces that make a junction physical. A single
+        /// long divider is used rather than three row-sized crates so the median cannot be
+        /// squeezed through between rows at high speed.
+        /// </summary>
+        private void SpawnJunctionHazards(Segment segment, JunctionPlan junction)
+        {
+            if (junction == null) return;
+            if (junction.UsesMedian)
+            {
+                float start = junction.BranchStartRow * RowSpacing;
+                float end = (junction.BranchEndRow + 1) * RowSpacing;
+                var divider = _obstaclePool.Spawn(ObstacleKind.JunctionDivider, segment.Root.transform,
+                    new Vector3(0f, 0f, (start + end) * 0.5f), 1, 1.8f, end - start, 0f, 1.34f);
+                divider.transform.localScale = new Vector3(1f, 1f, Mathf.Max(1f, end - start));
+                segment.Obstacles.Add(divider);
+            }
+            else if (junction.IsShortcut)
+            {
+                // The outer guard rail follows the shortcut's curve row by row. The inner
+                // edge stays open so a late lane change is possible but visually committed.
+                int lane = junction.RewardLane;
+                int side = junction.RewardOnLeft ? -1 : 1;
+                for (int row = junction.BranchStartRow; row < junction.MergeRow; row++)
+                {
+                    float z = row * RowSpacing + RowSpacing * 0.5f;
+                    float x = LaneMath.LaneToX(lane) + JunctionRules.RouteOffsetAt(junction, z, lane) +
+                              side * 1.55f;
+                    var edge = _obstaclePool.Spawn(ObstacleKind.JunctionEdge, segment.Root.transform,
+                        new Vector3(x, 0f, z), lane, 0.34f, RowSpacing + 0.1f, 0f, 1.2f);
+                    segment.Obstacles.Add(edge);
+                }
+            }
+            else if (junction.IsNarrowBridge)
+            {
+                float start = junction.BranchStartRow * RowSpacing;
+                float end = (junction.BranchEndRow + 1) * RowSpacing;
+                float depth = end - start;
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    var edge = _obstaclePool.Spawn(ObstacleKind.JunctionEdge, segment.Root.transform,
+                        new Vector3(side * 2.7f, 0f, (start + end) * 0.5f), side < 0 ? 0 : 2,
+                        2.08f, depth, 0f, 1.34f);
+                    edge.transform.localScale = new Vector3(1f, 1f, Mathf.Max(1f, depth));
+                    segment.Obstacles.Add(edge);
+                }
+            }
+            else if (junction.IsBrokenRoad)
+            {
+                bool collapsing = junction.IsCollapsingBridge;
+                var gap = _obstaclePool.Spawn(
+                    collapsing ? ObstacleKind.CollapsingBridge : ObstacleKind.RoadGap,
+                    segment.Root.transform,
+                    new Vector3(0f, 0f, 2 * RowSpacing + RowSpacing * 0.5f), 1,
+                    8.6f, collapsing ? 4.4f : 3.6f, 0f, 0.74f);
+                segment.Obstacles.Add(gap);
             }
         }
 
@@ -1171,7 +3175,7 @@ namespace NeonVelocity.World
                     {
                         int lane = empty.Count > 0 && n == 0 ? empty[rng.Range(0, empty.Count)] : passable[rng.Range(0, passable.Count)];
                         CellKind cell = row[lane];
-                        float x = LaneMath.LaneToX(lane);
+                        float laneX = LaneMath.LaneToX(lane);
                         if (cell == CellKind.LowBarrier || cell == CellKind.Electric)
                         {
                             // A readable arc rewards a well-timed jump.
@@ -1179,6 +3183,7 @@ namespace NeonVelocity.World
                             for (int i = 0; i < heights.Length; i++)
                             {
                                 float z = r * RowSpacing + 1.5f + i * 1.05f;
+                                float x = laneX + JunctionRules.RouteOffsetAt(plan.Junction, z, lane);
                                 AddCredit(segment, new Vector3(x, heights[i], z), rng);
                             }
                         }
@@ -1188,6 +3193,7 @@ namespace NeonVelocity.World
                             for (int i = 0; i < (coinRush ? 3 : 2); i++)
                             {
                                 float z = r * RowSpacing + 1.6f + i * 2.3f;
+                                float x = laneX + JunctionRules.RouteOffsetAt(plan.Junction, z, lane);
                                 AddCredit(segment, new Vector3(x, y, z), rng);
                             }
                         }
@@ -1196,12 +3202,18 @@ namespace NeonVelocity.World
                 else if (fullAction && rng.Chance(0.45f))
                 {
                     int lane = passable[rng.Range(0, passable.Count)];
-                    float x = LaneMath.LaneToX(lane);
+                    float laneX = LaneMath.LaneToX(lane);
                     float y = row[lane] == CellKind.OverheadGate ? 0.6f : 1.4f;
                     for (int i = 0; i < 3; i++)
-                        AddCredit(segment, new Vector3(x, y, r * RowSpacing + 1.7f + i * 1.5f), rng);
+                    {
+                        float z = r * RowSpacing + 1.7f + i * 1.5f;
+                        float x = laneX + JunctionRules.RouteOffsetAt(plan.Junction, z, lane);
+                        AddCredit(segment, new Vector3(x, y, z), rng);
+                    }
                 }
             }
+
+            SpawnJunctionPickups(segment, plan, rng);
 
             // Rare prism shard near an open path.
             if (rng.Chance(plan.IsBonus ? 0.35f : 0.12f))
@@ -1209,8 +3221,10 @@ namespace NeonVelocity.World
                 int lane = FindOpenLane(plan, rng.Range(0, plan.Rows.Length), rng);
                 if (lane >= 0)
                 {
+                    float z = rng.Range(4f, SegmentLength - 4f);
+                    float x = LaneMath.LaneToX(lane) + JunctionRules.RouteOffsetAt(plan.Junction, z, lane);
                     var prism = _pickupPool.SpawnCredit(segment.Root.transform,
-                        new Vector3(LaneMath.LaneToX(lane), 1.25f, rng.Range(4f, SegmentLength - 4f)), rng.Range(0f, 8f), true);
+                        new Vector3(x, 1.25f, z), rng.Range(0f, 8f), true);
                     segment.Credits.Add(prism);
                 }
             }
@@ -1229,8 +3243,9 @@ namespace NeonVelocity.World
                     if (lane >= 0)
                     {
                         float z = row * RowSpacing + rng.Range(2f, 5f);
+                        float x = LaneMath.LaneToX(lane) + JunctionRules.RouteOffsetAt(plan.Junction, z, lane);
                         var pickup = _pickupPool.SpawnPowerUp(segment.Root.transform, definition,
-                            new Vector3(LaneMath.LaneToX(lane), 1.2f, z), rng.Range(0f, 6.28f));
+                            new Vector3(x, 1.2f, z), rng.Range(0f, 6.28f));
                         segment.PowerUps.Add(pickup);
                     }
                 }
@@ -1243,6 +3258,66 @@ namespace NeonVelocity.World
             if (row.Left == CellKind.OverheadGate && row.Centre == CellKind.OverheadGate && row.Right == CellKind.OverheadGate) return true;
             if (row.Left == CellKind.Electric && row.Centre == CellKind.Electric && row.Right == CellKind.Electric) return true;
             return false;
+        }
+
+        /// <summary>
+        /// Junction rewards are deliberately authored, not random: the marked branch gets a
+        /// visible credit line and the secret variant adds one prism. Both branches are always
+        /// physically safe, so the choice is a reward route, never a hidden trap.
+        /// </summary>
+        private void SpawnJunctionPickups(Segment segment, SegmentPlan plan, DeterministicRandom rng)
+        {
+            var junction = plan.Junction;
+            if (junction == null || junction.IsCurvedRoad) return;
+            if (junction.IsBrokenRoad)
+            {
+                for (int i = 0; i < 6; i++)
+                {
+                    float z = 2 * RowSpacing + 0.2f + i * 0.72f;
+                    float y = 1.15f + Mathf.Sin(i / 5f * Mathf.PI) * 0.95f;
+                    AddCredit(segment, new Vector3(
+                        LaneMath.LaneToX(junction.RewardLane) +
+                        JunctionRules.RouteOffsetAt(junction, z, junction.RewardLane), y, z), rng);
+                }
+                if (junction.RewardIsSecret)
+                {
+                    float z = 2 * RowSpacing + 2.8f;
+                    var prism = _pickupPool.SpawnCredit(segment.Root.transform,
+                        new Vector3(LaneMath.LaneToX(junction.StandardLane) +
+                                    JunctionRules.RouteOffsetAt(junction, z, junction.StandardLane),
+                            1.35f, z),
+                        rng.Range(0f, 8f), true);
+                    segment.Credits.Add(prism);
+                }
+                return;
+            }
+
+            int lane = junction.IsNarrowBridge ? 1 : junction.RewardLane;
+            float laneX = LaneMath.LaneToX(lane);
+            for (int row = junction.BranchStartRow; row < junction.MergeRow; row++)
+            {
+                float baseZ = row * RowSpacing;
+                float z1 = baseZ + 2.2f;
+                float z2 = baseZ + 4.6f;
+                AddCredit(segment, new Vector3(laneX + JunctionRules.RouteOffsetAt(junction, z1, lane),
+                    0.95f, z1), rng);
+                AddCredit(segment, new Vector3(laneX + JunctionRules.RouteOffsetAt(junction, z2, lane),
+                    0.95f, z2), rng);
+                if (junction.RewardIsSecret)
+                {
+                    float z3 = baseZ + 3.4f;
+                    AddCredit(segment, new Vector3(laneX + JunctionRules.RouteOffsetAt(junction, z3, lane),
+                        1.55f, z3), rng);
+                }
+            }
+            if (junction.RewardIsSecret)
+            {
+                float z = (junction.MergeRow - 0.55f) * RowSpacing;
+                var prism = _pickupPool.SpawnCredit(segment.Root.transform,
+                    new Vector3(laneX + JunctionRules.RouteOffsetAt(junction, z, lane), 1.35f, z),
+                    rng.Range(0f, 8f), true);
+                segment.Credits.Add(prism);
+            }
         }
 
         private void AddCredit(Segment segment, Vector3 localPosition, DeterministicRandom rng)
@@ -1300,6 +3375,47 @@ namespace NeonVelocity.World
         }
 
         // ---- Runtime queries -------------------------------------------------------------
+
+        /// <summary>
+        /// Resolves the nearest active junction for a run distance. The director is queried
+        /// directly rather than only the streamed segments, so the HUD can show a 126 m warning
+        /// before the junction segment has been built.
+        /// </summary>
+        public bool GetJunctionState(float distance, out JunctionState state)
+        {
+            state = default;
+            if (_director == null) return false;
+            int current = Mathf.Max(0, Mathf.FloorToInt(Mathf.Max(0f, distance) / SegmentLength));
+            JunctionState best = default;
+            float bestDistance = float.MaxValue;
+            for (int index = current - 4; index <= current + 4; index++)
+            {
+                if (index < 0) continue;
+                var plan = _director.GetSegment(index).Junction;
+                if (plan == null) continue;
+                var candidate = JunctionRules.Resolve(plan, distance);
+                if (!candidate.IsActive) continue;
+                float marker = Mathf.Abs(candidate.MetresToCommit);
+                if (marker < bestDistance)
+                {
+                    bestDistance = marker;
+                    best = candidate;
+                }
+            }
+            state = best;
+            return best.IsActive;
+        }
+
+        /// <summary>
+        /// Lateral displacement of a lane at the current run distance. The runner, junction
+        /// pickups and world geometry all use this same pure function, which keeps the visible
+        /// road and the collision route physically connected.
+        /// </summary>
+        public float GetJunctionRouteOffset(float distance, int lane)
+        {
+            if (!GetJunctionState(distance, out var state)) return 0f;
+            return JunctionRules.RouteOffsetAt(state.Plan, distance - state.Plan.WorldStartZ, lane);
+        }
 
         public void CollectObstacles(float zMin, float zMax, List<Obstacle> results)
         {

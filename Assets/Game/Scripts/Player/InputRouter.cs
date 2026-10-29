@@ -21,6 +21,7 @@ namespace NeonVelocity.Player
         public event Action JumpRequested;
         public event Action JumpReleased;
         public event Action SlideRequested;
+        public event Action AbilityRequested;
 
         private float _sensitivity = 1f;
         private bool _gamepadLaneLatched;
@@ -61,6 +62,9 @@ namespace NeonVelocity.Player
                 JumpReleased?.Invoke();
             }
             if (kb.sKey.wasPressedThisFrame || kb.downArrowKey.wasPressedThisFrame) SlideRequested?.Invoke();
+            // Q / E are the dedicated ability keys. They are intentionally separate from the
+            // movement cluster so a deliberate activation can never be mistaken for a dodge.
+            if (kb.qKey.wasPressedThisFrame || kb.eKey.wasPressedThisFrame) AbilityRequested?.Invoke();
         }
 
         private void ReadGamepad()
@@ -88,6 +92,8 @@ namespace NeonVelocity.Player
                 JumpReleased?.Invoke();
             }
             if (gamepad.buttonEast.wasPressedThisFrame) SlideRequested?.Invoke();
+            if (gamepad.leftShoulder.wasPressedThisFrame || gamepad.rightShoulder.wasPressedThisFrame)
+                AbilityRequested?.Invoke();
         }
 
         private void ReadTouch()

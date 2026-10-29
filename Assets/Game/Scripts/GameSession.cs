@@ -5,6 +5,7 @@ using NeonVelocity.Core;
 using NeonVelocity.Effects;
 using NeonVelocity.Multiplayer;
 using NeonVelocity.Player;
+using NeonVelocity.Premium;
 using NeonVelocity.Progression;
 using NeonVelocity.UI;
 using NeonVelocity.Utilities;
@@ -33,6 +34,24 @@ namespace NeonVelocity
         public bool Online;
         public bool Verified;
         public bool NewBest;
+        /// <summary>True when the crash qualifies for a paid revive (offline runs only).</summary>
+        public bool ReviveAvailable;
+        /// <summary>Server-advertised GEM price for the exact-position revive.</summary>
+        public int ReviveCostGems;
+        /// <summary>Opaque run identity sent to the authoritative revive endpoint.</summary>
+        public string ReviveSessionId;
+        /// <summary>Idempotency key reused for every retry of this crash's revive request.</summary>
+        public string ReviveRequestId;
+        /// <summary>Display name of the district where the runner crashed.</summary>
+        public string LocationName;
+        /// <summary>Zone index captured at the crash position; sent with the revive request.</summary>
+        public int LocationIndex;
+        /// <summary>True while a crashed run is still recoverable and its rewards are unapplied.</summary>
+        public bool PreviewOnly;
+        /// <summary>True when this run pushed the profile to a new level.</summary>
+        public bool LevelUpAchieved;
+        /// <summary>Level after this run; shown on the LEVEL UP badge when LevelUpAchieved.</summary>
+        public int NewLevel;
         public string FailureNote;
         public string RaceId;
         public List<string> Messages = new List<string>();
@@ -76,6 +95,13 @@ namespace NeonVelocity
         public string ConnectionWarning { get; private set; } = "";
         public string Prompt { get; private set; } = "";
         public HUDScreen Hud { get; private set; }
+        /// <summary>True while the crashed session is still alive and its rewards are unapplied.</summary>
+        public bool IsAwaitingRevive => _hasPendingRun && _crashedForRevive;
+        public RunResult PendingResult => _pendingResult;
+        public string ReviveSessionId => _reviveSessionId;
+        public string ReviveRequestId => _reviveRequestId;
+        public int CrashLocationIndex => _crashLocationIndex;
+        public float CrashDistance => _crashState.Distance;
 
         private GameApp _app;
         private int _seed;
@@ -93,6 +119,18 @@ namespace NeonVelocity
         private readonly Dictionary<string, RemoteRunner> _remotes = new Dictionary<string, RemoteRunner>();
         private RaceClient Net => Online?.Client;
 
+        private RunSummary _pendingSummary;
+        private RunResult _pendingResult;
+        private RunnerReviveState _crashState;
+        private bool _hasPendingRun;
+        private bool _crashedForRevive;
+        private bool _rewardApplied;
+        private string _reviveSessionId = "";
+        private string _reviveRequestId = "";
+        private int _crashLocationIndex;
+        private int _newLocationsThisRun;
+        private int _pendingLevelBefore;
+
         private static readonly float[] TutorialDistances = { 10f, 80f, 170f, 260f, 300f };
         private static readonly string[] TutorialPrompts =
         {
@@ -103,12 +141,21 @@ namespace NeonVelocity
             "TRAINING COMPLETE"
         };
 
-        public void Begin(GameApp app, ModeSpec mode, int seed, OnlineRaceContext online)
+        public void Begin(GameApp app, ModeSpec mode, int seed, OnlineRaceContext online, float reviveHeadStart = -1f)
         {
             _app = app;
             Mode = mode;
             _seed = seed;
             Online = online;
+            _hasPendingRun = false;
+            _crashedForRevive = false;
+            _rewardApplied = false;
+            _pendingResult = null;
+            _pendingSummary = default;
+            _newLocationsThisRun = 0;
+            _reviveSessionId = "nvrun-" + Guid.NewGuid().ToString("N");
+            _reviveRequestId = "";
+            _crashLocationIndex = 0;
             _duration = online != null ? online.DurationSeconds : (mode.IsTimed ? mode.DurationSeconds : 0f);
             if (online != null)
             {
@@ -134,6 +181,7 @@ namespace NeonVelocity
             runnerGo.transform.SetParent(transform, false);
             Runner = runnerGo.AddComponent<RunnerController>();
             Runner.Begin(app, app.Config, mode, Track, Input, seed);
+            if (reviveHeadStart > 0f) Runner.GrantHeadStart(reviveHeadStart);
 
             Vfx = VfxService.Create(transform, app.Profile.settings.reducedMotion, 24);
             Runner.BindVfx(Vfx);
@@ -144,7 +192,7 @@ namespace NeonVelocity
             CameraRig.transform.position = new Vector3(0f, 4.2f, Runner.PlayerZ - 6.7f);
             Environment = EnvironmentController.Create(transform, app, mode.Id, Track, Runner, CameraRig.Camera,
                 app.Profile.settings.reducedMotion, app.Profile.settings.graphicsPreset);
-            var theme = app.Config.Theme(Track.CurrentBiome < 0 ? 0 : Track.CurrentBiome);
+            var theme = app.Config.LocationTheme(Track.CurrentZoneIndex < 0 ? 0 : Track.CurrentZoneIndex);
             Vfx.CreateSpeedLines(CameraRig.Camera, theme != null ? theme.accent : Palette.Cyan);
             Vfx.SetEngineTrailColor(theme != null ? theme.accent : Palette.Cyan);
 
@@ -155,6 +203,7 @@ namespace NeonVelocity
             Runner.WorldRebased += OnWorldRebased;
             Track.BiomeChanged += OnBiomeChanged;
             Track.BiomeChanged += _ => UpdateObjectiveLabel();
+            Track.LocationChanged += OnLocationChanged;
 
             if (online != null)
             {
@@ -181,6 +230,8 @@ namespace NeonVelocity
 
             Input.ResetTransient();
             UpdateObjectiveLabel();
+            if (online == null && Track.CurrentZoneIndex >= 0)
+                OnLocationChanged(Track.CurrentZoneIndex);
             if (Mode.Id == GameModeId.Tutorial)
             {
                 Prompt = TutorialPrompts[0];
@@ -213,12 +264,27 @@ namespace NeonVelocity
             hud.SetOnlinePlayerList(_players);
             hud.SetPrompt(Prompt);
             hud.SetConnectionWarning(ConnectionWarning);
+            // Pin the opening district so runs (and revived head starts) open with a
+            // sense of place even when the change event fired before the HUD existed.
+            if (Track != null)
+            {
+                int zone = Track.CurrentZoneIndex < 0 ? 0 : Track.CurrentZoneIndex;
+                var theme = _app != null ? _app.Config.LocationTheme(zone) : null;
+                if (theme != null) hud.ShowLocation(theme.displayName);
+                if (_newLocationsThisRun > 0)
+                {
+                    hud.ShowBanner("NEW LOCATION  \u2014  " + LocationCatalog.Get(zone).displayName,
+                        Palette.Lime, 3.2f);
+                    _app?.Audio.PlaySfx("sfx_location", 0.9f);
+                }
+            }
         }
 
         private void Update()
         {
             if (IsFinished) return;
             if (IsPaused) return;
+            if (_crashedForRevive) return;
 
             if (CountdownVisible)
             {
@@ -239,6 +305,9 @@ namespace NeonVelocity
 
             RaceElapsed += Time.unscaledDeltaTime;
             Vfx.SetSpeedLines(Speed > 20f, SpeedNormalisedForVfx);
+            // Hazards advance from the run's simulation clock before the runner is swept, so
+            // pausing, reviving, frame hitches and background tabs cannot teleport a spinner.
+            Track.TickHazards(Runner.Elapsed);
             Runner.Tick(Time.deltaTime);
 
             if (Mode.Id == GameModeId.Tutorial) UpdateTutorial();
@@ -328,14 +397,9 @@ namespace NeonVelocity
                 FinishRun(false, true);
                 return;
             }
-            switch (Mode.Id)
+            if (Mode.HasTargetDistance && Distance >= Mode.TargetDistance)
             {
-                case GameModeId.DailyChallenge when Distance >= 600f:
-                case GameModeId.WeeklyChallenge when Distance >= 1500f:
-                case GameModeId.SeasonalEvent when Distance >= 1000f:
-                case GameModeId.Tutorial when Distance >= 300f:
-                    FinishRun(false, true);
-                    break;
+                FinishRun(false, true);
             }
         }
 
@@ -348,11 +412,108 @@ namespace NeonVelocity
             if (Online != null)
             {
                 CompleteLocalOnline("dead");
+                return;
             }
-            else
+
+            if (CanOfferRevive())
             {
-                FinishRun(true, false);
+                BeginRevivePreview();
+                return;
             }
+            FinishRun(true, false);
+        }
+
+        private bool CanOfferRevive()
+        {
+            return Online == null
+                && Mode.AllowsCrash
+                && Mode.CountsProgression
+                && Mode.Id != GameModeId.Survival
+                && Runner != null
+                && Runner.Distance >= 450f;
+        }
+
+        /// <summary>
+        /// Freezes a crashed but recoverable session. Rewards are previewed, never applied:
+        /// the player may pay the server-authoritative GEMS price to resume at the exact metre
+        /// of death, or leave the results screen, at which point the run is finalized once.
+        /// </summary>
+        private void BeginRevivePreview()
+        {
+            _crashedForRevive = true;
+            _rewardApplied = false;
+            Input.Enabled = false;
+            Vfx?.SetSpeedLines(false);
+            _crashState = Runner.CaptureReviveState();
+            _crashLocationIndex = Mathf.Max(0, Track.CurrentZoneIndex);
+            _reviveRequestId = PremiumService.NewRequestId();
+            _pendingLevelBefore = App.Profile.level;
+            _pendingSummary = BuildSummary(true);
+            var preview = App.Progression.PreviewRun(_pendingSummary);
+            _pendingResult = BuildResult(_pendingSummary, preview, true, true, true);
+            _pendingResult.Messages.Add("PAY " + _pendingResult.ReviveCostGems +
+                                        " GEMS TO RESUME AT " + UITheme.FormatDistance(_pendingResult.Distance));
+            _hasPendingRun = true;
+            Hud?.ShowBanner("SIGNAL LOST - REVIVE AVAILABLE", Palette.Magenta, 3.2f);
+            StartCoroutine(DelayedPreview());
+        }
+
+        private IEnumerator DelayedPreview()
+        {
+            yield return new WaitForSecondsRealtime(0.75f);
+            if (!_crashedForRevive || _rewardApplied) yield break;
+            App.ShowResults(_pendingResult);
+        }
+
+        /// <summary>
+        /// Applies the pending crashed run exactly once. Safe to call repeatedly; used when
+        /// leaving the results screen, restarting, returning to the menu or quitting.
+        /// </summary>
+        public RunResult FinalizePendingRun()
+        {
+            if (!_hasPendingRun || _rewardApplied) return _pendingResult;
+            _rewardApplied = true;
+            _hasPendingRun = false;
+            _crashedForRevive = false;
+            var rewards = App.Progression.ApplyRun(_pendingSummary);
+            var final = BuildResult(_pendingSummary, rewards, true, false, false);
+            if (App.Profile.level > _pendingLevelBefore)
+            {
+                final.LevelUpAchieved = true;
+                final.NewLevel = App.Profile.level;
+                final.Messages.Add("RUNNER LEVEL " + App.Profile.level);
+                App.Audio.PlaySfx("sfx_levelup", 0.9f);
+            }
+            _pendingResult = final;
+            IsFinished = true;
+            Hud?.SetRunOver(true);
+            return final;
+        }
+
+        /// <summary>
+        /// Called only after the authority has atomically debited the revive price. The same
+        /// session, distance, lane, score and pickups continue; nothing is re-generated.
+        /// </summary>
+        public bool ReviveAtExactPosition()
+        {
+            if (!_hasPendingRun || !_crashedForRevive) return false;
+            _hasPendingRun = false;
+            _crashedForRevive = false;
+            _pendingResult = null;
+            _pendingSummary = default;
+            int stabilizer = App.Profile.PremiumUpgradeLevel("revive_stabilizer");
+            float invulnerability = Mathf.Clamp(2.6f + stabilizer * 0.4f, 2.6f, 4.2f);
+            Runner.ReviveAt(_crashState, invulnerability);
+            Input.Enabled = true;
+            Input.ResetTransient();
+            IsPaused = false;
+            Time.timeScale = 1f;
+            Hud?.SetRunOver(false);
+            Hud?.ShowBanner("SIGNAL RESTORED", Palette.Cyan, 2f);
+            Hud?.Flash(Palette.Cyan, 0.28f);
+            Vfx?.SetSpeedLines(true, SpeedNormalisedForVfx);
+            App.Audio.PlaySfx("sfx_revive", 0.9f);
+            return true;
         }
 
         private void OnRunnerCrashed()
@@ -383,17 +544,45 @@ namespace NeonVelocity
 
         private void OnBiomeChanged(int biome)
         {
-            var theme = App.Config.Theme(biome);
+            int zone = Track != null && Track.CurrentZoneIndex >= 0 ? Track.CurrentZoneIndex : 0;
+            var theme = App.Config.LocationTheme(zone);
             if (theme == null) return;
-            string ambience = biome switch
+            string ambience;
+            switch (theme.styleIndex)
             {
-                1 => "ambience_skyway",
-                2 => "ambience_reactor",
-                3 => "ambience_tunnel",
-                _ => theme.rain ? "ambience_rain" : "ambience_city"
-            };
+                case 2: ambience = "ambience_reactor"; break;
+                case 3: ambience = "ambience_tunnel"; break;
+                case 4: ambience = theme.weather == 2 ? "ambience_snow" : "ambience_skyway"; break;
+                case 6: ambience = "ambience_coast"; break;
+                case 7: ambience = "ambience_forest"; break;
+                case 9: ambience = "ambience_volcanic"; break;
+                case 1: ambience = "ambience_skyway"; break;
+                default: ambience = theme.rain || theme.weather == 1 ? "ambience_rain" : "ambience_city"; break;
+            }
             App.Audio.PlayAmbience(ambience, 0.4f);
+            // Alternating score beds keep a long multi-district run from looping one track.
+            string music = (zone & 1) == 0 ? "music_run" : "music_run_alt";
+            App.Audio.PlayMusic(music, 0.55f, 1.8f);
             Vfx?.SetEngineTrailColor(theme.accent);
+        }
+
+        private void OnLocationChanged(int zoneIndex)
+        {
+            var location = LocationCatalog.Get(zoneIndex);
+            if (location == null) return;
+            if (Online == null && Mode.CountsProgression)
+            {
+                App.Progression.RegisterLocationDiscovery(zoneIndex,
+                    Runner != null ? Runner.Distance : 0f, out bool firstDiscovery);
+                if (firstDiscovery)
+                {
+                    _newLocationsThisRun++;
+                    Hud?.ShowBanner("NEW LOCATION  \u2014  " + location.displayName, Palette.Lime, 3.2f);
+                    Hud?.Toast("DISCOVERED  " + location.subtitle, Palette.Lime);
+                    App.Audio.PlaySfx("sfx_location", 0.9f);
+                }
+            }
+            Hud?.ShowLocation(location.displayName);
         }
 
         // ---- Online race ------------------------------------------------------------------
@@ -717,9 +906,26 @@ namespace NeonVelocity
         private IEnumerator DelayedResults(bool crashed, bool victory)
         {
             yield return new WaitForSecondsRealtime(0.85f);
-            int nearMissCredits = Runner.NearMisses * 3;
-            bool newBest = Runner.Distance > App.Profile.bestDistance;
-            var summary = new RunSummary
+            int levelBefore = App.Profile.level;
+            var summary = BuildSummary(crashed);
+            var rewards = App.Progression.ApplyRun(summary);
+            var result = BuildResult(summary, rewards, crashed, false, false);
+            if (App.Profile.level > levelBefore)
+            {
+                result.LevelUpAchieved = true;
+                result.NewLevel = App.Profile.level;
+                result.Messages.Add("RUNNER LEVEL " + App.Profile.level);
+                App.Audio.PlaySfx("sfx_levelup", 0.9f);
+            }
+            if (Mode.Id == GameModeId.Tutorial && victory)
+                result.Messages.Add("FIRST CONTACT COMPLETE");
+            App.ShowResults(result);
+        }
+
+        /// <summary>Snapshots the current run exactly once for preview or finalisation.</summary>
+        private RunSummary BuildSummary(bool crashed)
+        {
+            return new RunSummary
             {
                 ModeId = Mode.Id,
                 Distance = Runner.Distance,
@@ -732,22 +938,27 @@ namespace NeonVelocity
                 SurvivalSeconds = Runner.Elapsed,
                 Crashed = crashed,
                 OnlineResult = false,
-                NearMissCredits = nearMissCredits,
-                ScoreBonus = 0
+                NearMissCredits = Runner.NearMisses * 3,
+                ScoreBonus = 0,
+                NewLocations = _newLocationsThisRun
             };
-            var rewards = App.Progression.ApplyRun(summary);
-            var result = new RunResult
+        }
+
+        private RunResult BuildResult(RunSummary summary, RunRewards rewards, bool crashed,
+            bool previewOnly, bool canRevive)
+        {
+            return new RunResult
             {
-                ModeId = Mode.Id,
+                ModeId = summary.ModeId,
                 ModeTitle = Mode.Title,
-                Distance = Runner.Distance,
+                Distance = summary.Distance,
                 Time = RaceElapsed,
-                Score = Runner.Score,
-                Coins = Runner.Coins,
-                Jumps = Runner.Jumps,
-                Slides = Runner.Slides,
-                NearMisses = Runner.NearMisses,
-                PowerUpsUsed = Runner.PowerUpsUsed,
+                Score = summary.Score,
+                Coins = summary.Coins,
+                Jumps = summary.Jumps,
+                Slides = summary.Slides,
+                NearMisses = summary.NearMisses,
+                PowerUpsUsed = summary.PowerUpsUsed,
                 CreditsEarned = rewards.Credits,
                 XpEarned = rewards.Xp,
                 Placement = 1,
@@ -755,12 +966,18 @@ namespace NeonVelocity
                 Crashed = crashed,
                 Online = false,
                 Verified = true,
-                NewBest = newBest,
+                NewBest = summary.Distance > App.Profile.bestDistance,
+                ReviveAvailable = canRevive,
+                ReviveCostGems = App.Premium != null
+                    ? App.Premium.ReviveCostGems
+                    : PremiumService.DefaultReviveCostGems,
+                ReviveSessionId = _reviveSessionId,
+                ReviveRequestId = _reviveRequestId,
+                LocationIndex = crashed ? _crashLocationIndex : Mathf.Max(0, Track.CurrentZoneIndex),
+                LocationName = LocationCatalog.NameForDistance(summary.Distance),
+                PreviewOnly = previewOnly,
                 Messages = rewards.Messages ?? new List<string>()
             };
-            if (Mode.Id == GameModeId.Tutorial && victory)
-                result.Messages.Add("FIRST CONTACT COMPLETE");
-            App.ShowResults(result);
         }
 
         private void UpdateTutorial()
@@ -777,15 +994,14 @@ namespace NeonVelocity
 
         private void UpdateObjectiveLabel()
         {
-            float target = Mode.Id switch
+            float target = Mode.TargetDistance;
+            if (Mode.Id == GameModeId.RouteExploration)
             {
-                GameModeId.DailyChallenge => 600f,
-                GameModeId.WeeklyChallenge => 1500f,
-                GameModeId.SeasonalEvent => 1000f,
-                GameModeId.Tutorial => 300f,
-                _ => 0f
-            };
-            if (target > 0f)
+                int junctions = Runner != null ? Runner.JunctionsTaken : 0;
+                ObjectiveLabel = "ROUTE SURVEY  ·  " + junctions + " JUNCTIONS";
+                ObjectiveProgress = Mathf.Clamp01(Distance / Mathf.Max(1f, target));
+            }
+            else if (target > 0f)
             {
                 ObjectiveLabel = $"TARGET {target:0} M";
                 ObjectiveProgress = Mathf.Clamp01(Distance / target);
@@ -821,6 +1037,9 @@ namespace NeonVelocity
                 return UITheme.FormatTime(RaceElapsed);
             }
         }
+
+        /// <summary>Describes the centre readout so elapsed time is never mistaken for distance.</summary>
+        public string TimerCaption => Mode.IsTimed || IsOnline ? "TIME LEFT" : "RUN TIME";
 
         public void SetPaused(bool paused)
         {

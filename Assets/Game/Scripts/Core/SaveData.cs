@@ -6,13 +6,17 @@ namespace NeonVelocity.Core
     [Serializable]
     public class SaveData
     {
-        public const int CurrentSchemaVersion = 3;
+        public const int CurrentSchemaVersion = 5;
 
         public int schemaVersion = CurrentSchemaVersion;
         public string playerId = "";
         public string playerName = "RUNNER-01";
         public int credits = 500;
+        /// <summary>Legacy pre-v4 total XP. Read only for migration; never written after v4.</summary>
         public int xp = 0;
+        /// <summary>Authoritative total XP. Level is always derived from this value.</summary>
+        public long totalXp = 0;
+        /// <summary>Derived cache of <see cref="LevelProgression.LevelForXp"/>.</summary>
         public int level = 1;
         public string selectedCharacter = "kira";
         public List<string> unlockedCharacters = new List<string> { "kira" };
@@ -36,12 +40,31 @@ namespace NeonVelocity.Core
         public bool hasSeenWelcome = false;
         public int seasonXp = 0;
         public int seasonLevel = 1;
+        /// <summary>GameModeId of the most recent offline session; powers the CONTINUE shortcut.</summary>
+        public string lastModeId = "";
+
+        // ---- World exploration ---------------------------------------------------------
+        public List<string> discoveredLocations = new List<string>();
+        public int furthestLocationIndex = -1;
+        public List<LocationRecord> locationRecords = new List<LocationRecord>();
+
+        // ---- Premium (server-authoritative; cached values are display-only) ------------
+        public PremiumCache premium = new PremiumCache();
+        // ---- Account identity and cloud sync (never stores GEMS authority) --------------
+        public AccountCache account = new AccountCache();
+        public string selectedSkin = "";
+        public string selectedArmor = "";
+        public string selectedHelmet = "";
+        public string selectedEffect = "";
+        public string selectedMovementEffect = "";
+        public string selectedAnimation = "";
+        public string selectedPremiumAbility = "";
 
         public UpgradeEntry FindUpgrade(string id)
         {
             if (upgrades == null) upgrades = new List<UpgradeEntry>();
             for (int i = 0; i < upgrades.Count; i++)
-                if (upgrades[i].id == id) return upgrades[i];
+                if (upgrades[i] != null && upgrades[i].id == id) return upgrades[i];
             return null;
         }
 
@@ -57,6 +80,35 @@ namespace NeonVelocity.Core
             for (int i = 0; i < modeBests.Count; i++)
                 if (modeBests[i].modeId == modeId) return modeBests[i];
             return null;
+        }
+
+        public LocationRecord FindLocationRecord(string locationId)
+        {
+            if (locationRecords == null) locationRecords = new List<LocationRecord>();
+            for (int i = 0; i < locationRecords.Count; i++)
+                if (locationRecords[i].locationId == locationId) return locationRecords[i];
+            return null;
+        }
+
+        public bool HasDiscoveredLocation(string locationId) =>
+            discoveredLocations != null && discoveredLocations.Contains(locationId);
+
+        public PremiumOwnership FindPremiumOwnership(string productId)
+        {
+            if (premium == null) premium = new PremiumCache();
+            if (premium.ownedItems == null) premium.ownedItems = new List<PremiumOwnership>();
+            for (int i = 0; i < premium.ownedItems.Count; i++)
+                if (premium.ownedItems[i].productId == productId) return premium.ownedItems[i];
+            return null;
+        }
+
+        public int PremiumUpgradeLevel(string upgradeId)
+        {
+            if (premium == null) premium = new PremiumCache();
+            if (premium.upgrades == null) premium.upgrades = new List<PremiumUpgradeEntry>();
+            for (int i = 0; i < premium.upgrades.Count; i++)
+                if (premium.upgrades[i].upgradeId == upgradeId) return premium.upgrades[i].level;
+            return 0;
         }
 
         public void MarkRedeemed(string id, int keepAtMost = 100)
@@ -89,6 +141,77 @@ namespace NeonVelocity.Core
     }
 
     [Serializable]
+    public class LocationRecord
+    {
+        public string locationId;
+        public int zoneIndex;
+        public float bestDistance;
+        public int visits;
+        public string firstSeenUtc;
+        public string lastSeenUtc;
+    }
+
+    [Serializable]
+    public class PremiumCache
+    {
+        public string accountId = "";
+        public string deviceKey = "";
+        public string token = "";
+        public string tokenIssuedUtc = "";
+        public int gems = 0;
+        public int pendingOrders = 0;
+        public string lastSyncUtc = "";
+        public string lastCatalogUtc = "";
+        public string catalogJson = "";
+        public string lastOrderId = "";
+        public string lastOrderUtc = "";
+        public List<PremiumOwnership> ownedItems = new List<PremiumOwnership>();
+        public List<string> characters = new List<string>();
+        public string selectedPremiumAbility = "";
+        public List<PremiumUpgradeEntry> upgrades = new List<PremiumUpgradeEntry>();
+        /// <summary>True when the cached token belongs to a registered account, not a guest.</summary>
+        public bool persistentSession = false;
+    }
+
+    /// <summary>
+    /// Non-authoritative account metadata for the UI and cloud-sync cursor. GEMS, entitlements
+    /// and bearer tokens are never trusted from this block; they remain in PremiumCache and
+    /// are always reconciled with the server.
+    /// </summary>
+    [Serializable]
+    public class AccountCache
+    {
+        public string accountId = "";
+        public string email = "";
+        public string phone = "";
+        public string provider = "";
+        public string receiptEmail = "";
+        public bool emailVerified = false;
+        public bool phoneVerified = false;
+        public bool signedIn = false;
+        public int syncRevision = 0;
+        public string lastSyncUtc = "";
+        public string lastSyncSummary = "";
+        public string lastSyncError = "";
+    }
+
+    [Serializable]
+    public class PremiumOwnership
+    {
+        public string productId;
+        public string category;
+        public int level;
+        public string acquiredUtc;
+    }
+
+    [Serializable]
+    public class PremiumUpgradeEntry
+    {
+        public string upgradeId;
+        public int level;
+    }
+
+    [Serializable]
     public class LifetimeStats
     {
         public int totalRuns;
@@ -104,11 +227,15 @@ namespace NeonVelocity.Core
         public int missionsClaimed;
         public int dailyRewardsClaimed;
         public int nearMisses;
+        public int levelsGained;
+        public int locationsDiscovered;
+        public int premiumPurchases;
     }
 
     [Serializable]
     public class SettingsData
     {
+        public float masterVolume = 1f;
         public float musicVolume = 0.62f;
         public float sfxVolume = 0.8f;
         public float ambienceVolume = 0.5f;
@@ -135,6 +262,16 @@ namespace NeonVelocity.Core
         public string serverHost = "127.0.0.1";
         public int serverPort = 7777;
         public string preferredLanguage = "en";
+        /// <summary>HTTPS endpoint of the premium GEMS service. Configure this for production.</summary>
+        public string premiumServerUrl = "http://127.0.0.1:8088";
+
+        // ---- Time of day -------------------------------------------------------------
+        /// <summary>0 authored per location, 1 dynamic cycle, 2 fixed phase.</summary>
+        public int timeOfDayMode = 0;
+        /// <summary>Fixed phase used when <see cref="timeOfDayMode"/> is 2 (0..6).</summary>
+        public int timeOfDayPhase = 2;
+        /// <summary>Metres for one complete seven-state cycle in dynamic mode.</summary>
+        public float timeOfDayCycleMetres = 21_000f;
     }
 
     [Serializable]
@@ -184,7 +321,8 @@ namespace NeonVelocity.Core
         PowerUps = 5,
         Races = 6,
         Score = 7,
-        NearMisses = 8
+        NearMisses = 8,
+        Locations = 9
     }
 
     /// <summary>Migration is deliberately explicit and tested; never assume defaults survive.</summary>
@@ -203,6 +341,32 @@ namespace NeonVelocity.Core
             if (data.settings == null) data.settings = new SettingsData();
             if (data.missions == null) data.missions = new MissionSave();
             if (data.missions.missions == null) data.missions.missions = new List<MissionState>();
+            if (data.discoveredLocations == null) data.discoveredLocations = new List<string>();
+            if (data.locationRecords == null) data.locationRecords = new List<LocationRecord>();
+            if (data.premium == null) data.premium = new PremiumCache();
+            if (data.account == null) data.account = new AccountCache();
+            if (data.account.accountId == null) data.account.accountId = "";
+            if (data.account.email == null) data.account.email = "";
+            if (data.account.phone == null) data.account.phone = "";
+            if (data.account.provider == null) data.account.provider = "";
+            if (data.account.receiptEmail == null) data.account.receiptEmail = "";
+            if (data.account.lastSyncUtc == null) data.account.lastSyncUtc = "";
+            if (data.account.lastSyncSummary == null) data.account.lastSyncSummary = "";
+            if (data.account.lastSyncError == null) data.account.lastSyncError = "";
+            if (data.account.syncRevision < 0) data.account.syncRevision = 0;
+
+            // v3 and older stored total XP as an int on the old linear curve. Convert the
+            // player's level and fraction into the authored total-XP curve exactly once.
+            if (data.schemaVersion < 4 || (data.totalXp <= 0L && data.xp > 0))
+            {
+                long legacy = Math.Max(0, data.xp);
+                if (legacy > 0L)
+                    data.totalXp = LevelProgression.FromLegacyXp(legacy, data.level);
+                data.xp = 0;
+            }
+            data.totalXp = LevelProgression.SanitiseXp(data.totalXp);
+            data.level = LevelProgression.LevelForXp(data.totalXp);
+
             if (string.IsNullOrEmpty(data.playerName)) data.playerName = "RUNNER-01";
             if (data.playerName.Length > 20) data.playerName = data.playerName.Substring(0, 20);
             if (string.IsNullOrEmpty(data.selectedCharacter)) data.selectedCharacter = "kira";
@@ -213,12 +377,64 @@ namespace NeonVelocity.Core
             if (!data.unlockedTrails.Contains(data.selectedTrail)) data.selectedTrail = "spark";
             if (data.credits < 0) data.credits = 0;
             if (data.xp < 0) data.xp = 0;
-            if (data.level < 1) data.level = 1;
             if (data.dailyStreak < 0 || data.dailyStreak > 7) data.dailyStreak = 0;
             if (data.bestDistance < 0f) data.bestDistance = 0f;
             if (data.seasonXp < 0) data.seasonXp = 0;
             if (data.seasonLevel < 1) data.seasonLevel = 1;
+            if (data.furthestLocationIndex < -1) data.furthestLocationIndex = -1;
+            if (data.furthestLocationIndex >= LocationCatalog.Count)
+                data.furthestLocationIndex = LocationCatalog.Count - 1;
             ClampSettings(data.settings);
+
+            // v5 rebuilt the world from twenty-one five-kilometre districts to twenty
+            // three-kilometre locations. Drop retired location ids instead of rendering
+            // phantom discoveries, and re-seat the furthest index inside the new catalogue.
+            if (data.schemaVersion < 5)
+            {
+                for (int i = data.discoveredLocations.Count - 1; i >= 0; i--)
+                    if (LocationCatalog.Find(data.discoveredLocations[i]) == null)
+                        data.discoveredLocations.RemoveAt(i);
+                for (int i = data.locationRecords.Count - 1; i >= 0; i--)
+                    if (LocationCatalog.Find(data.locationRecords[i].locationId) == null)
+                        data.locationRecords.RemoveAt(i);
+                if (data.furthestLocationIndex >= LocationCatalog.Count)
+                    data.furthestLocationIndex = LocationCatalog.Count - 1;
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            for (int i = data.discoveredLocations.Count - 1; i >= 0; i--)
+            {
+                string id = data.discoveredLocations[i];
+                if (string.IsNullOrEmpty(id) || !seen.Add(id))
+                    data.discoveredLocations.RemoveAt(i);
+            }
+            for (int i = data.locationRecords.Count - 1; i >= 0; i--)
+            {
+                var record = data.locationRecords[i];
+                if (record == null || string.IsNullOrEmpty(record.locationId))
+                    data.locationRecords.RemoveAt(i);
+            }
+            if (data.discoveredLocations.Count > 0 && data.furthestLocationIndex < 0)
+                data.furthestLocationIndex = 0;
+
+            if (data.premium.deviceKey == null) data.premium.deviceKey = "";
+            if (data.premium.token == null) data.premium.token = "";
+            if (data.premium.catalogJson == null) data.premium.catalogJson = "";
+            if (data.premium.ownedItems == null) data.premium.ownedItems = new List<PremiumOwnership>();
+            if (data.premium.characters == null) data.premium.characters = new List<string>();
+            if (data.premium.upgrades == null) data.premium.upgrades = new List<PremiumUpgradeEntry>();
+            if (data.premium.gems < 0) data.premium.gems = 0;
+            if (data.premium.pendingOrders < 0) data.premium.pendingOrders = 0;
+            data.premium.deviceKey = data.premium.deviceKey.Trim();
+            if (data.premium.deviceKey.Length > 128)
+                data.premium.deviceKey = data.premium.deviceKey.Substring(0, 128);
+            for (int i = data.premium.upgrades.Count - 1; i >= 0; i--)
+            {
+                var upgrade = data.premium.upgrades[i];
+                if (upgrade == null || string.IsNullOrEmpty(upgrade.upgradeId))
+                    data.premium.upgrades.RemoveAt(i);
+                else upgrade.level = Math.Max(0, Math.Min(3, upgrade.level));
+            }
 
             while (data.redeemedRewardIds.Count > 100) data.redeemedRewardIds.RemoveAt(0);
             for (int i = 0; i < data.upgrades.Count; i++)
@@ -230,6 +446,8 @@ namespace NeonVelocity.Core
 
         public static void ClampSettings(SettingsData s)
         {
+            if (s == null) return;
+            s.masterVolume = Clamp01(s.masterVolume);
             s.musicVolume = Clamp01(s.musicVolume);
             s.sfxVolume = Clamp01(s.sfxVolume);
             s.ambienceVolume = Clamp01(s.ambienceVolume);
@@ -251,6 +469,18 @@ namespace NeonVelocity.Core
             s.viewDistance = Math.Max(0, Math.Min(2, s.viewDistance));
             if (s.serverPort < 1 || s.serverPort > 65535) s.serverPort = 7777;
             if (string.IsNullOrWhiteSpace(s.serverHost)) s.serverHost = "127.0.0.1";
+            if (string.IsNullOrWhiteSpace(s.premiumServerUrl))
+                s.premiumServerUrl = "http://127.0.0.1:8088";
+            else s.premiumServerUrl = s.premiumServerUrl.Trim();
+            if (s.premiumServerUrl.Length > 300)
+                s.premiumServerUrl = s.premiumServerUrl.Substring(0, 300);
+            s.timeOfDayMode = Math.Max(0, Math.Min(2, s.timeOfDayMode));
+            s.timeOfDayPhase = TimeOfDayCatalog.ClampPhase(s.timeOfDayPhase);
+            if (float.IsNaN(s.timeOfDayCycleMetres) || float.IsInfinity(s.timeOfDayCycleMetres) ||
+                s.timeOfDayCycleMetres <= 0f)
+                s.timeOfDayCycleMetres = TimeOfDayCatalog.DefaultCycleMetres;
+            s.timeOfDayCycleMetres = Math.Max(TimeOfDayCatalog.MinimumCycleMetres,
+                Math.Min(TimeOfDayCatalog.MaximumCycleMetres, s.timeOfDayCycleMetres));
         }
 
         private static float Clamp01(float value) => Math.Max(0f, Math.Min(1f, value));

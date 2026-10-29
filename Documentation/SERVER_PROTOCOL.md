@@ -517,7 +517,8 @@ remains usable unless the text says it closes (line/rate/session errors).
 | Leaderboard stored entries | 1,000 |
 
 There is no connection-count, per-IP or bandwidth limit beyond the per-connection rules, and
-no TLS, account service or cluster coordination.
+no TLS or cluster coordination. The race authority has no persistent account system; account
+identity, cloud sync and payments belong to the separate premium HTTP service in section 12.
 
 ---
 
@@ -546,8 +547,9 @@ library.
 
 - **No transport security.** `nv1` is plaintext TCP with bearer tokens. Use a trusted LAN,
   VPN or another protected path. The stock Unity client cannot use TLS.
-- **Ephemeral identity.** Tokens live only in memory. There are no passwords, accounts,
-  recovery, device linking or moderation tools.
+- **Ephemeral identity.** Race tokens live only in memory. The race authority has no
+  passwords, accounts, recovery, device linking or moderation tools; those are handled by the
+  separate premium/account HTTP service.
 - **Server-side outcomes.** Bots, countdown, seed, ranking, rewards and leaderboard writes are
   server-owned. Clients cannot choose a placement, reward or final distance outside the
   validated envelope.
@@ -562,3 +564,132 @@ and [TEST_REPORT.md](TEST_REPORT.md). Tests cover authentication, two- and five-
 bots, private rooms, readiness/host rules, ranking/rewards, persistence, early-finish
 rejection, snapshot attacks, dead-run rewards, missing finish fallback, reconnection and
 malformed/unauthenticated input.
+
+---
+
+## 12. Premium, account and payment HTTP service
+
+**Authority:** `Backend/premium_server.py`  
+**Transport:** HTTP/1.1 JSON, UTF-8, `Authorization: Bearer <token>` for player routes  
+**Default endpoint:** `http://127.0.0.1:8088` (development only; production must be HTTPS)  
+**Storage:** `premium.sqlite3` (wallet, catalogue, ownership, ledger, transactions),
+`accounts.sqlite3` (identities, profiles, cloud saves)
+
+This is a separate service from the `nv1` race authority. The race server never issues GEM
+balances or account identities. The two services may share a host but do not share a port,
+protocol or token namespace.
+
+### Response envelope and errors
+
+Successful responses contain `"ok": true`. Errors contain:
+
+```json
+{ "ok": false, "code": "INSUFFICIENT_GEMS", "error": "NOT ENOUGH GEMS!" }
+```
+
+The client maps `code` to a player-facing message and never treats an HTTP 200 alone as proof
+of payment. Common codes include `UNAUTHORIZED`, `STORE_OFFLINE`, `INSUFFICIENT_GEMS`,
+`INVALID_RECEIPT`, `DUPLICATE_TRANSACTION`, `PROVIDER_NOT_CONFIGURED`,
+`PRICE_NOT_CONFIGURED`, `PACKAGE_DISABLED`, `PRODUCT_DISABLED`, `RATE_LIMITED` and
+`MANUAL_TRANSFER_DISABLED`.
+
+### Public and catalogue routes
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/v1/health` | GET | Liveness and store status |
+| `/api/v1/store/catalog` | GET | Effective packages, products and GEM counts |
+| `/api/v1/store/payments` | GET | Provider capability flags and product maps |
+| `/api/v1/auth/guest` | POST | Create/restore a guest wallet from a device key |
+| `/api/v1/auth/register` | POST | Email/password registration with display name |
+| `/api/v1/auth/login` | POST | Email/password sign-in |
+| `/api/v1/auth/logout` | POST | Revoke the current bearer token |
+| `/api/v1/auth/link` | POST | Attach email/password to the current guest wallet |
+| `/api/v1/auth/email/verify` | POST | Consume an email verification code |
+| `/api/v1/auth/password/request` | POST | Issue a one-time reset code |
+| `/api/v1/auth/password/reset` | POST | Consume the reset code and revoke sessions |
+| `/api/v1/auth/phone/start` | POST | Start phone OTP |
+| `/api/v1/auth/phone/verify` | POST | Verify OTP and create/restore the phone account |
+| `/api/v1/auth/oauth` | POST | Verify a Google/Apple ID token when configured |
+
+`/api/v1/auth/guest` returns a wallet bearer token. Registered-account routes use the same
+token format but bind the token to the account identity. Guest tokens never silently become
+account tokens; use `/api/v1/auth/link` to preserve the wallet and progression.
+
+### Authenticated player routes
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/v1/wallet` | GET | Server wallet balance and pending legacy orders |
+| `/api/v1/ownership` | GET | Owned products and characters |
+| `/api/v1/account/profile` | GET/POST | Read/update display name and receipt email |
+| `/api/v1/account/email` | POST | Request an email change and verification |
+| `/api/v1/account/sync` | GET/POST | Pull or merge progression with `baseRevision` and a client request id |
+| `/api/v1/account/transactions` | GET | Payment/refund history for the wallet |
+| `/api/v1/account/identities` | GET | Linked providers |
+| `/api/v1/purchases` | POST | Spend GEMS on a server-catalogued product |
+| `/api/v1/revive` | POST | Debit an exact-position revive once for a run session |
+
+`GET /api/v1/account/sync` and `POST /api/v1/account/sync` deliberately exclude GEM balances,
+transactions, premium ownership and payment data. The merge is monotonic for progression and
+returns a revision plus any conflict summary. Oversized or revision-ahead snapshots are
+rejected.
+
+Purchases and revives require a client-generated idempotency key. Replaying the same key
+returns the original result without a second debit. A revive also carries the captured session
+id, distance and location; the server validates the session and debits once before the client
+resumes the run.
+
+### Payment routes
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/v1/payments/checkout` | POST | Create a Stripe-hosted Checkout session for a package |
+| `/api/v1/payments/stripe/webhook` | POST | Raw signed Stripe event; credits/refunds once |
+| `/api/v1/payments/apple` | POST | Verify an App Store receipt and credit once |
+| `/api/v1/payments/google` | POST | Verify a Google Play purchase token and credit once |
+
+The client submits only `packageId`/`productId`, the provider receipt or purchase token, and an
+optional `receiptEmail`. It never submits an amount, currency or success flag. Card checkout
+returns an HTTPS Stripe URL; the Unity client opens it in the system browser and refreshes the
+wallet when focus returns. Stripe settlement is asynchronous: only the signed webhook can
+credit.
+
+Apple verification uses the shared secret and the App Store verify endpoint with sandbox
+fallback. Google verification uses the Android Publisher API with a service account and
+requires `purchaseState == 0`. Both providers key idempotency on the provider transaction id;
+a duplicate returns `processed: false` without changing the balance.
+
+### Admin routes
+
+Admin routes require a short-lived bearer token from `POST /api/v1/admin/login` and are never
+built into the Unity client.
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/api/v1/admin/login` | POST | Admin credential exchange |
+| `/api/v1/admin/transactions` | GET | Filter by provider/status; paged by limit |
+| `/api/v1/admin/accounts` | GET | Search account id, player name, email or phone |
+| `/api/v1/admin/accounts/{id}` | GET | Identities, wallet and recent transactions |
+| `/api/v1/admin/catalog` | GET | Effective catalogue |
+| `/api/v1/admin/catalog/packages/{id}` | POST | Name/description/price/enabled override |
+| `/api/v1/admin/catalog/products/{id}` | POST | Product price/enabled override |
+| `/api/v1/admin/transactions/{id}/refund` | POST | Reverse GEMS after provider refund, with `confirmed: true` |
+| `/api/v1/admin/orders`, `/stats`, `/ledger` | GET | Legacy order/ledger views |
+
+The server dispatches GET, POST and OPTIONS only. Admin catalogue updates cannot change GEM
+counts. A refund refuses to run unless the operator confirms the provider-side refund and the
+transaction is still refundable.
+
+### Security boundary
+
+- No card number, CVV or provider secret is accepted by the Unity client or written to local
+  saves. Stripe uses hosted checkout; Apple/Google use their official store sheets via Unity
+  IAP.
+- GEMS are credited only by a verified webhook or store receipt. There is no local mint, no
+  client-supplied balance and no gameplay GEM award.
+- Receipts are sent only after verified settlement and contain no payment-card data.
+- The admin API uses a separate credential, short token lifetime and audit records. It must be
+  additionally protected by VPN/allowlist in production.
+- Full deployment, provider setup, receipt, refund, backup and credential procedures are in
+  [PREMIUM_DEPLOYMENT.md](../Backend/PREMIUM_DEPLOYMENT.md).

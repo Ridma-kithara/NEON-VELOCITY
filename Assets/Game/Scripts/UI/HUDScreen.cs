@@ -13,6 +13,9 @@ namespace NeonVelocity.UI
     /// In-run HUD. Everything is bound to the live GameSession so no game object needs to be
     /// wired in the scene. Online races additionally show a five-runner board and connection
     /// state, including a clear warning that an interrupted race cannot grant rewards.
+    /// Visual language: glass cards with technical borders (UITheme.GlassCard), rolling
+    /// NumberTicker readouts for score/distance/credits, a pinned district callout on biome
+    /// changes and a sheen-swept velocity gauge across the bottom.
     /// </summary>
     public sealed class HUDScreen : MonoBehaviour
     {
@@ -24,13 +27,16 @@ namespace NeonVelocity.UI
         private Text _score;
         private Text _distance;
         private Text _timer;
+        private Text _timerCaption;
         private Text _objectiveLabel;
         private Image _objectiveFill;
         private Text _credits;
         private Text _lives;
         private Image _speedFill;
+        private Text _speedText;
         private Text _countdown;
         private Text _banner;
+        private Text _location;
         private Text _prompt;
         private Text _connection;
         private Text _spectating;
@@ -44,10 +50,28 @@ namespace NeonVelocity.UI
         private readonly List<Text> _onlineMeta = new List<Text>(5);
         private readonly List<GameObject> _effectChips = new List<GameObject>();
 
+        private NumberTicker _scoreTicker;
+        private NumberTicker _distanceTicker;
+        private NumberTicker _creditsTicker;
+        private PulseBar _speedBar;
+        private int _speedBand;
+        private Image _abilityPanel;
+        private Button _abilityButton;
+        private Text _abilityLabel;
+        private Text _abilityCooldown;
+        private GameObject _junctionPanel;
+        private Text _junctionTitle;
+        private Text _junctionHint;
+        private Image _junctionAccent;
+        private JunctionPhase _lastJunctionPhase;
+        private int _lastJunctionSegment = -1;
+        private float _junctionFlash;
+
         private float _refreshTimer;
         private float _effectsTimer;
         private Coroutine _bannerRoutine;
         private Coroutine _flashRoutine;
+        private Coroutine _locationRoutine;
         private float _creditsPulse;
         private int _pendingEnergy;
         private float _energyToastTimer;
@@ -72,26 +96,86 @@ namespace NeonVelocity.UI
             UITheme.Stretch((RectTransform)_flash.transform);
             _flash.raycastTarget = false;
 
-            BuildPlayerPanel(root);
-            BuildCentrePanel(root);
+            BuildTelemetryGroup(root);
+            BuildObjectivePanel(root);
             BuildCurrencyPanel(root);
+            BuildSpeedGauge(root);
             BuildOnlinePanel(root);
             BuildPrompt(root);
             BuildCountdown(root);
+            BuildJunctionPanel(root);
             BuildWindowTag(root);
 
-            // Pause is always available; it does not consume a swipe on touch. Keep the glyph
-            // below the 54 px hit box so Unity's truncation cannot hide it.
+            // Pause is always available; it does not consume a swipe on touch.
             var pause = UITheme.IconButton(root, "Pause", "II", UITheme.Cyan, () => _app.ShowPause(), 30);
             UITheme.Anchor((RectTransform)pause.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
                 new Vector2(-80f, 34f), new Vector2(-26f, 88f));
+
+            BuildAbilityButton(root);
         }
 
-        private void BuildPlayerPanel(RectTransform root)
+        /// <summary>
+        /// Premium-frame ability trigger. The panel only appears for a runner that actually
+        /// owns a signature ability, so standard frames keep the original HUD silhouette.
+        /// </summary>
+        private void BuildAbilityButton(RectTransform root)
         {
-            var panel = UITheme.Img(root, "Runner Panel", UITheme.PanelSoft, UITheme.Rounded, false);
-            UITheme.Anchor((RectTransform)panel.transform, new Vector2(0f, 1f), new Vector2(0f, 1f),
-                new Vector2(24f, -154f), new Vector2(424f, -24f));
+            _abilityPanel = UITheme.Img(root, "Ability Panel", UITheme.PanelSoft, UITheme.Rounded, false);
+            UITheme.Anchor((RectTransform)_abilityPanel.transform, new Vector2(1f, 0f), new Vector2(1f, 0f),
+                new Vector2(-318f, 96f), new Vector2(-26f, 178f));
+            _abilityButton = UITheme.Button(_abilityPanel.transform, "Ability", "ABILITY", UITheme.Violet,
+                ActivateAbility, UITheme.BodySize);
+            UITheme.Stretch((RectTransform)_abilityButton.transform, 10f, 30f, 10f, 10f);
+            _abilityLabel = _abilityButton.GetComponentInChildren<Text>();
+            _abilityCooldown = UITheme.Label(_abilityPanel.transform, "Ability Cooldown", "READY", 13,
+                UITheme.Lime, TextAnchor.MiddleCenter, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)_abilityCooldown.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
+                new Vector2(10f, 6f), new Vector2(-10f, 26f));
+            _abilityPanel.gameObject.SetActive(false);
+        }
+
+        private void ActivateAbility()
+        {
+            if (_session == null) return;
+            _app.Audio.PlayUiClick();
+            _session.Runner?.ActivateAbility();
+        }
+
+        private void RefreshAbility()
+        {
+            var runner = _session != null ? _session.Runner : null;
+            bool hasAbility = runner != null && runner.HasAbility;
+            if (_abilityPanel != null && _abilityPanel.gameObject.activeSelf != hasAbility)
+                _abilityPanel.gameObject.SetActive(hasAbility);
+            if (!hasAbility) return;
+            float remaining = runner.AbilityCooldownRemaining;
+            bool ready = remaining <= 0.01f;
+            if (_abilityLabel != null)
+                _abilityLabel.text = runner.AbilityActive
+                    ? runner.AbilityName + " ACTIVE"
+                    : runner.AbilityName;
+            if (_abilityCooldown != null)
+            {
+                _abilityCooldown.text = ready ? "READY  [Q / E]" : Mathf.CeilToInt(remaining) + "S";
+                _abilityCooldown.color = ready ? UITheme.Lime : UITheme.Muted;
+            }
+            if (_abilityButton != null)
+            {
+                _abilityButton.interactable = ready;
+                var colors = _abilityButton.colors;
+                colors.normalColor = ready ? Color.white : new Color(0.62f, 0.62f, 0.72f, 0.85f);
+                _abilityButton.colors = colors;
+            }
+        }
+
+        /// <summary>Top-left card: runner identity, rolling score and distance tape.</summary>
+        private void BuildTelemetryGroup(RectTransform root)
+        {
+            var border = UITheme.GlassCard(root, "Runner Panel", UITheme.PanelSoft, 0.5f);
+            var panel = border.transform.parent as RectTransform;
+            UITheme.Anchor(panel, new Vector2(0f, 1f), new Vector2(0f, 1f),
+                new Vector2(24f, -198f), new Vector2(430f, -24f));
+            border.color = UITheme.Cyan.Alpha(0.5f);
             var accent = UITheme.Img(panel.transform, "Accent", UITheme.Cyan);
             UITheme.Anchor((RectTransform)accent.transform, new Vector2(0f, 0f), new Vector2(0f, 1f),
                 new Vector2(0f, 12f), new Vector2(4f, -12f));
@@ -99,34 +183,49 @@ namespace NeonVelocity.UI
             _name = UITheme.Label(panel.transform, "Name", "RUNNER", UITheme.SmallSize, UITheme.Dim,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)_name.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-                new Vector2(22f, -38f), new Vector2(-16f, -10f));
+                new Vector2(22f, -40f), new Vector2(-16f, -12f));
 
-            _score = UITheme.Label(panel.transform, "Score", "0", 38, UITheme.White,
+            var scoreLabel = UITheme.Label(panel.transform, "Score Label", "SCORE", 13, UITheme.Muted,
+                TextAnchor.MiddleLeft, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)scoreLabel.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(22f, -70f), new Vector2(-16f, -44f));
+
+            _score = UITheme.Label(panel.transform, "Score", "0", 40, UITheme.White,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)_score.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-                new Vector2(20f, -86f), new Vector2(-16f, -36f));
+                new Vector2(20f, -114f), new Vector2(-16f, -62f));
+            UITheme.AddShadow(_score, new Color(0f, 0f, 0f, 0.6f), new Vector2(1f, -2f));
+            _scoreTicker = NumberTicker.Attach(_score.gameObject, _score, 0);
 
-            _distance = UITheme.Label(panel.transform, "Distance", "0 m", UITheme.BodySize, UITheme.Cyan,
+            _distance = UITheme.Label(panel.transform, "Distance", "0 m", 30, UITheme.Cyan,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)_distance.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(22f, 10f), new Vector2(-16f, 38f));
+                new Vector2(22f, 12f), new Vector2(-16f, 52f));
+            _distanceTicker = NumberTicker.Attach(_distance.gameObject, _distance, 0, v => FormatDistance((float)v));
         }
 
-        private void BuildCentrePanel(RectTransform root)
+        private void BuildObjectivePanel(RectTransform root)
         {
-            var panel = UITheme.Img(root, "Timer Panel", UITheme.PanelSoft, UITheme.Rounded, false);
-            UITheme.Anchor((RectTransform)panel.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
-                new Vector2(-190f, -130f), new Vector2(190f, -24f));
+            var border = UITheme.GlassCard(root, "Timer Panel", UITheme.PanelSoft, 0.4f);
+            var panel = border.transform.parent as RectTransform;
+            UITheme.Anchor(panel, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(-196f, -134f), new Vector2(196f, -24f));
+            border.color = Color.white.Alpha(0.32f);
 
-            _timer = UITheme.Label(panel.transform, "Timer", "0.0", 40, UITheme.White,
+            _timerCaption = UITheme.Label(panel.transform, "Timer Caption", "RUN TIME", 12, UITheme.Muted,
+                TextAnchor.MiddleCenter, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)_timerCaption.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(12f, -18f), new Vector2(-12f, -2f));
+
+            _timer = UITheme.Label(panel.transform, "Timer", "0.0", 38, UITheme.White,
                 TextAnchor.MiddleCenter, FontStyle.Bold);
             UITheme.Anchor((RectTransform)_timer.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-                new Vector2(12f, -64f), new Vector2(-12f, -8f));
+                new Vector2(12f, -64f), new Vector2(-12f, -18f));
 
             _objectiveLabel = UITheme.Label(panel.transform, "Objective", "DISTANCE", UITheme.SmallSize,
                 UITheme.Dim, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UITheme.Anchor((RectTransform)_objectiveLabel.transform, new Vector2(0f, 0f), new Vector2(0.7f, 0f),
-                new Vector2(18f, 22f), new Vector2(-4f, 48f));
+            UITheme.Anchor((RectTransform)_objectiveLabel.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
+                new Vector2(18f, 22f), new Vector2(-18f, 44f));
 
             var bar = UITheme.Img(panel.transform, "Objective Bar", new Color(0.12f, 0.18f, 0.28f, 0.9f),
                 UITheme.Rounded, false);
@@ -142,23 +241,32 @@ namespace NeonVelocity.UI
             _connection = UITheme.Label(panel.transform, "Connection", "", UITheme.SmallSize, UITheme.Amber,
                 TextAnchor.MiddleCenter, FontStyle.Bold);
             UITheme.Anchor((RectTransform)_connection.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(10f, -32f), new Vector2(-10f, -6f));
+                new Vector2(10f, -34f), new Vector2(-10f, -8f));
         }
 
         private void BuildCurrencyPanel(RectTransform root)
         {
-            var panel = UITheme.Img(root, "Currency Panel", UITheme.PanelSoft, UITheme.Rounded, false);
-            UITheme.Anchor((RectTransform)panel.transform, new Vector2(1f, 1f), new Vector2(1f, 1f),
-                new Vector2(-382f, -130f), new Vector2(-140f, -24f));
+            var border = UITheme.GlassCard(root, "Currency Panel", UITheme.PanelSoft, 0.45f);
+            var panel = border.transform.parent as RectTransform;
+            UITheme.Anchor(panel, new Vector2(1f, 1f), new Vector2(1f, 1f),
+                new Vector2(-392f, -130f), new Vector2(-142f, -24f));
+            border.color = UITheme.Amber.Alpha(0.5f);
 
             var creditIcon = UITheme.Img(panel.transform, "Credit Icon", UITheme.Amber, TextureFactory.Diamond, false);
             UITheme.Anchor((RectTransform)creditIcon.transform, new Vector2(0f, 0.5f), new Vector2(0f, 0.5f),
                 new Vector2(18f, -13f), new Vector2(44f, 13f));
 
-            _credits = UITheme.Label(panel.transform, "Credits", "0", 28, UITheme.Amber,
+            var currencyHeader = UITheme.Label(panel.transform, "Credits Title", "CREDITS", 13, UITheme.Muted,
+                TextAnchor.MiddleLeft, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)currencyHeader.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(54f, -28f), new Vector2(-12f, -8f));
+
+            _credits = UITheme.Label(panel.transform, "Credits", "0", 26, UITheme.Amber,
                 TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)_credits.transform, new Vector2(0f, 0f), new Vector2(1f, 1f),
-                new Vector2(54f, 8f), new Vector2(-12f, -6f));
+                new Vector2(54f, 4f), new Vector2(-12f, -30f));
+            _creditsTicker = NumberTicker.Attach(_credits.gameObject, _credits, _app.Profile != null ? _app.Profile.credits : 0);
+            _creditsTicker.SetFormatter(v => v.ToString("N0"));
 
             var livesPanel = UITheme.Img(root, "Lives Panel", UITheme.PanelSoft, UITheme.Rounded, false);
             UITheme.Anchor((RectTransform)livesPanel.transform, new Vector2(1f, 1f), new Vector2(1f, 1f),
@@ -166,25 +274,46 @@ namespace NeonVelocity.UI
             _lives = UITheme.Label(livesPanel.transform, "Lives", "\u25C6", 28, UITheme.Red,
                 TextAnchor.MiddleCenter, FontStyle.Bold);
             UITheme.Stretch((RectTransform)_lives.transform, 4f, 4f, 4f, 4f);
+        }
 
-            var speedBg = UITheme.Img(root, "Speed Bar", new Color(0.08f, 0.12f, 0.2f, 0.8f), UITheme.Rounded, false);
+        /// <summary>Bottom velocity gauge: sheen-swept fill plus a numeric readout.</summary>
+        private void BuildSpeedGauge(RectTransform root)
+        {
+            var speedBg = UITheme.Img(root, "Speed Bar", new Color(0.08f, 0.12f, 0.2f, 0.78f), UITheme.Rounded, false);
             UITheme.Anchor((RectTransform)speedBg.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(24f, 24f), new Vector2(-24f, 30f));
+                new Vector2(24f, 24f), new Vector2(-24f, 42f));
             _speedFill = UITheme.Img(speedBg.transform, "Fill", UITheme.Magenta, UITheme.Rounded, false);
             var speedRect = (RectTransform)_speedFill.transform;
             speedRect.anchorMin = Vector2.zero;
             speedRect.anchorMax = new Vector2(0f, 1f);
             speedRect.offsetMin = Vector2.zero;
             speedRect.offsetMax = Vector2.zero;
-        }
 
+            // Sheen quad sweeps the bar when the velocity band jumps (boost, ramp-up).
+            var sheen = UITheme.Img(speedBg.transform, "Sheen", Color.white.Alpha(0.28f), null, false);
+            var sheenRect = (RectTransform)sheen.transform;
+            sheenRect.anchorMin = new Vector2(0f, 0f);
+            sheenRect.anchorMax = new Vector2(0f, 1f);
+            sheenRect.pivot = new Vector2(0.5f, 0.5f);
+            sheenRect.sizeDelta = new Vector2(56f, 0f);
+            sheenRect.anchoredPosition = new Vector2(-200f, 0f);
+            sheen.gameObject.SetActive(false);
+
+            _speedBar = PulseBar.Attach(_speedFill, sheenRect);
+            _speedBar.Snap(0f);
+
+            _speedText = UITheme.Label(speedBg.transform, "Speed Text", "0 M/S", UITheme.SmallSize,
+                UITheme.White, TextAnchor.MiddleRight, FontStyle.Bold);
+            UITheme.Stretch((RectTransform)_speedText.transform, -128f, 4f, 16f, 4f);
+        }
         private void BuildOnlinePanel(RectTransform root)
         {
-            var panel = UITheme.Img(root, "Online Panel", new Color(0.03f, 0.06f, 0.11f, 0.78f),
-                UITheme.Rounded, false);
+            var border = UITheme.GlassCard(root, "Online Panel", new Color(0.03f, 0.06f, 0.11f, 0.78f), 0.4f);
+            var panel = border.transform.parent as RectTransform;
+            border.color = UITheme.Lime.Alpha(0.4f);
             _onlinePanel = panel.gameObject;
-            UITheme.Anchor((RectTransform)panel.transform, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
-                new Vector2(-350f, -210f), new Vector2(-24f, 210f));
+            UITheme.Anchor(panel, new Vector2(1f, 0.5f), new Vector2(1f, 0.5f),
+                new Vector2(-350f, -190f), new Vector2(-24f, 190f));
             var heading = UITheme.Label(panel.transform, "Heading", "CIRCUIT", UITheme.SmallSize,
                 UITheme.Cyan, TextAnchor.MiddleLeft, FontStyle.Bold);
             UITheme.Anchor((RectTransform)heading.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
@@ -229,12 +358,12 @@ namespace NeonVelocity.UI
             _prompt = UITheme.Label(root, "Prompt", "", UITheme.BodySize, UITheme.White,
                 TextAnchor.MiddleCenter, FontStyle.Bold);
             UITheme.Anchor((RectTransform)_prompt.transform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f),
-                new Vector2(-620f, 46f), new Vector2(620f, 94f));
+                new Vector2(-620f, 56f), new Vector2(620f, 104f));
             UITheme.AddShadow(_prompt, new Color(0f, 0f, 0f, 0.9f), new Vector2(1f, -2f));
 
             _effectsRow = UITheme.NewRect(root, "Effects");
             UITheme.Anchor(_effectsRow, new Vector2(0f, 0f), new Vector2(0f, 0f),
-                new Vector2(24f, 40f), new Vector2(620f, 104f));
+                new Vector2(24f, 52f), new Vector2(620f, 116f));
             var layout = _effectsRow.gameObject.AddComponent<HorizontalLayoutGroup>();
             layout.spacing = 8f;
             layout.childControlHeight = false;
@@ -261,10 +390,18 @@ namespace NeonVelocity.UI
             UITheme.AddOutline(_banner, new Color(0f, 0f, 0f, 0.9f), new Vector2(2f, -2f));
             _banner.gameObject.SetActive(false);
 
+            // District callout: pinned under the objective panel between the glass cards.
+            _location = UITheme.Label(root, "Location", "", 34, UITheme.White, TextAnchor.MiddleCenter,
+                FontStyle.Bold);
+            UITheme.Anchor((RectTransform)_location.transform, new Vector2(0.5f, 1f), new Vector2(0.5f, 1f),
+                new Vector2(-420f, -196f), new Vector2(420f, -148f));
+            UITheme.AddOutline(_location, new Color(0f, 0f, 0f, 0.9f), new Vector2(2f, -2f));
+            _location.gameObject.SetActive(false);
+
             _runOver = UITheme.Label(root, "Run Over", "", 30, UITheme.Red, TextAnchor.MiddleCenter,
                 FontStyle.Bold);
             UITheme.Anchor((RectTransform)_runOver.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
-                new Vector2(-400f, -125f), new Vector2(400f, -70f));
+                new Vector2(-400f, -130f), new Vector2(400f, -76f));
             _runOver.gameObject.SetActive(false);
 
             _spectating = UITheme.Label(root, "Spectating", "SPECTATING - AWAITING SERVER RESULT", 20,
@@ -274,12 +411,149 @@ namespace NeonVelocity.UI
             _spectating.gameObject.SetActive(false);
         }
 
+        private void BuildJunctionPanel(RectTransform root)
+        {
+            var panel = UITheme.Img(root, "Junction Panel", new Color(0.025f, 0.045f, 0.075f, 0.86f),
+                UITheme.Rounded, false);
+            _junctionPanel = panel.gameObject;
+            UITheme.Anchor((RectTransform)panel.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-440f, 150f), new Vector2(440f, 258f));
+
+            _junctionAccent = UITheme.Img(panel.transform, "Junction Accent", UITheme.Cyan, null, false);
+            UITheme.Anchor((RectTransform)_junctionAccent.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
+                new Vector2(0f, 0f), new Vector2(0f, 4f));
+
+            _junctionTitle = UITheme.Label(panel.transform, "Junction Title", "JUNCTION", 30,
+                UITheme.White, TextAnchor.MiddleCenter, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)_junctionTitle.transform, new Vector2(0f, 0.5f), new Vector2(1f, 1f),
+                new Vector2(20f, 0f), new Vector2(-20f, -10f));
+
+            _junctionHint = UITheme.Label(panel.transform, "Junction Hint", "", 20,
+                UITheme.Cyan, TextAnchor.MiddleCenter, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)_junctionHint.transform, new Vector2(0f, 0f), new Vector2(1f, 0.5f),
+                new Vector2(20f, 10f), new Vector2(-20f, 4f));
+            _junctionPanel.SetActive(false);
+        }
+
+        private void RefreshJunction()
+        {
+            if (_junctionPanel == null) return;
+            var runner = _session.Runner;
+            JunctionState state = default;
+            bool show = runner != null && !_session.CountdownVisible && !_session.IsFinished &&
+                        _session.Track != null;
+            if (show) show = _session.Track.GetJunctionState(_session.Distance, out state);
+            if (!show)
+            {
+                if (_junctionPanel.activeSelf) _junctionPanel.SetActive(false);
+                _lastJunctionPhase = JunctionPhase.None;
+                _lastJunctionSegment = -1;
+                return;
+            }
+
+            if (!_junctionPanel.activeSelf) _junctionPanel.SetActive(true);
+            var plan = state.Plan;
+            if (_lastJunctionSegment != plan.SegmentIndex)
+            {
+                _lastJunctionSegment = plan.SegmentIndex;
+                _junctionFlash = 1f;
+            }
+            if (_lastJunctionPhase != state.Phase)
+            {
+                _lastJunctionPhase = state.Phase;
+                _junctionFlash = Mathf.Max(_junctionFlash, 0.7f);
+            }
+
+            string title;
+            string hint;
+            Color accent = UITheme.Cyan;
+            switch (state.Phase)
+            {
+                case JunctionPhase.Warning:
+                    int metres = Mathf.Max(1, Mathf.CeilToInt(Mathf.Abs(state.MetresToCommit)));
+                    title = plan.DisplayName + " AHEAD  ·  " + metres + " M";
+                    hint = plan.IsCollapsingBridge ? "HOLD CENTRE  ·  JUMP THE COLLAPSING GAP"
+                        : plan.IsBrokenRoad ? "HOLD CENTRE  ·  JUMP THE BREAK"
+                        : plan.IsNarrowBridge ? "MOVE TO THE CENTRE LANE"
+                        : plan.IsCurvedRoad ? (plan.CurveSign < 0
+                            ? "ROAD BENDS LEFT  ·  HOLD YOUR LINE"
+                            : "ROAD BENDS RIGHT  ·  HOLD YOUR LINE")
+                        : plan.IsShortcut ? "MARKED SIDE LANE OPENS  ·  SWIPE FOR REWARDS"
+                        : "CHOOSE A BRANCH  ·  \u25C0 LEFT   RIGHT \u25B6";
+                    accent = UITheme.Amber;
+                    break;
+                case JunctionPhase.Commit:
+                    title = "COMMIT NOW  ·  " + plan.DisplayName;
+                    hint = plan.IsBrokenRoad ? "JUMP"
+                        : plan.IsNarrowBridge ? "CENTRE LANE"
+                        : plan.IsCurvedRoad ? "HOLD THE BEND"
+                        : plan.IsShortcut ? "SWIPE INTO THE MARKED LANE"
+                        : "SWIPE LEFT OR RIGHT";
+                    accent = UITheme.Amber;
+                    break;
+                case JunctionPhase.Branch:
+                    var commitment = runner.JunctionCommitment;
+                    if (plan.IsBrokenRoad)
+                    {
+                        title = plan.IsCollapsingBridge ? "COLLAPSING BRIDGE" : "BROKEN ROAD";
+                        hint = "HOLD CENTRE  ·  CLEAR THE GAP";
+                        accent = UITheme.Amber;
+                    }
+                    else if (plan.IsCurvedRoad)
+                    {
+                        title = plan.CurveSign < 0 ? "CURVING LEFT" : "CURVING RIGHT";
+                        hint = "FOLLOW THE ROAD LIGHTS";
+                        accent = UITheme.Cyan;
+                    }
+                    else if (plan.IsShortcut)
+                    {
+                        bool onShortcut = runner.Lane == plan.RewardLane;
+                        title = onShortcut ? "SHORTCUT ROUTE" : "MAIN ROUTE";
+                        hint = onShortcut ? "REWARD ROUTE  ·  HOLD THE LINE" : "HOLD YOUR LINE";
+                        accent = onShortcut ? UITheme.Lime : UITheme.Cyan;
+                    }
+                    else
+                    {
+                        title = commitment == JunctionBranch.Left ? "LEFT BRANCH"
+                            : commitment == JunctionBranch.Right ? "RIGHT BRANCH"
+                            : plan.IsNarrowBridge ? "NARROW BRIDGE"
+                            : "CHOOSE A BRANCH";
+                        hint = plan.IsNarrowBridge ? "HOLD THE CENTRE LINE"
+                            : commitment == JunctionBranch.None ? "\u25C0 LEFT   OR   RIGHT \u25B6"
+                            : plan.RewardOnLeft == (commitment == JunctionBranch.Left)
+                                ? "REWARD ROUTE  ·  HOLD THE LINE"
+                                : "STANDARD ROUTE  ·  HOLD THE LINE";
+                        accent = plan.RewardOnLeft == (commitment == JunctionBranch.Left)
+                            ? UITheme.Lime : UITheme.Cyan;
+                    }
+                    break;
+                default:
+                    title = "MERGE  ·  " + plan.DisplayName;
+                    hint = "HOLD YOUR LINE";
+                    accent = UITheme.Lime;
+                    break;
+            }
+
+            _junctionTitle.text = title;
+            _junctionHint.text = hint;
+            _junctionHint.color = accent;
+            _junctionAccent.color = accent;
+
+            if (_junctionFlash > 0f)
+            {
+                _junctionFlash = Mathf.Max(0f, _junctionFlash - Time.unscaledDeltaTime * 2.8f);
+                float scale = 1f + _junctionFlash * 0.035f;
+                _junctionPanel.transform.localScale = Vector3.one * scale;
+            }
+            else _junctionPanel.transform.localScale = Vector3.one;
+        }
+
         private void BuildWindowTag(RectTransform root)
         {
             _windowLabel = UITheme.Label(root, "Mode", "", UITheme.SmallSize, UITheme.Muted,
                 TextAnchor.MiddleRight, FontStyle.Bold);
             UITheme.Anchor((RectTransform)_windowLabel.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
-                new Vector2(24f, -196f), new Vector2(-24f, -170f));
+                new Vector2(24f, -200f), new Vector2(-24f, -174f));
         }
 
         public void Bind(GameSession session)
@@ -293,20 +567,43 @@ namespace NeonVelocity.UI
             bool showLives = session.Mode.StartingLives > 1 || session.Mode.Id == GameModeId.Survival;
             if (_lives.transform.parent != null) _lives.transform.parent.gameObject.SetActive(showLives);
             _lives.gameObject.SetActive(showLives);
+            if (_scoreTicker != null) _scoreTicker.JumpTo(session.Score);
+            if (_distanceTicker != null) _distanceTicker.JumpTo(Mathf.RoundToInt(session.Distance));
+        }
+
+        private string FormatDistance(float metres)
+        {
+            if (metres >= 1000f)
+                return (metres / 1000f).ToString("0.00") + " km";
+            return Mathf.RoundToInt(metres) + " m";
         }
 
         private void Update()
         {
             if (_session == null) return;
 
-            _score.text = UITheme.FormatNumber(_session.Score);
-            _distance.text = UITheme.FormatDistance(_session.Distance);
+            if (_scoreTicker != null) _scoreTicker.Set(_session.Score);
+            if (_distanceTicker != null) _distanceTicker.Set(Mathf.RoundToInt(_session.Distance));
             _timer.text = _session.TimerLabel;
-            _credits.text = UITheme.FormatNumber(_app.Profile.credits);
-            _objectiveLabel.text = _session.ObjectiveLabel;
+            if (_timerCaption != null) _timerCaption.text = _session.TimerCaption;
+            if (_creditsTicker != null) _creditsTicker.Set(_app.Profile.credits);
+            _objectiveLabel.text = "OBJECTIVE · " + _session.ObjectiveLabel;
             _objectiveFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(_session.ObjectiveProgress), 1f);
-            _speedFill.rectTransform.anchorMax = new Vector2(
-                Mathf.Clamp01(_session.Runner != null ? _session.Runner.SpeedNormalised : 0f), 1f);
+            float speedNorm = _session.Runner != null ? _session.Runner.SpeedNormalised : 0f;
+            if (_speedBar != null) _speedBar.Set(speedNorm);
+            // Sweep the gauge sheen once when the velocity band jumps (boost or ramp-up).
+            int band = Mathf.FloorToInt(speedNorm * 5f);
+            if (band != _speedBand)
+            {
+                bool jumped = band > _speedBand;
+                _speedBand = band;
+                if (jumped && _speedBar != null) _speedBar.TriggerSheen();
+            }
+            if (_speedText != null && _session.Runner != null)
+                _speedText.text = Mathf.RoundToInt(_session.Runner.Speed) + " M/S";
+
+            RefreshAbility();
+            RefreshJunction();
 
             if (_session.Lives > 1)
                 _lives.text = "\u25C6 " + _session.Lives;
@@ -447,7 +744,45 @@ namespace NeonVelocity.UI
         public void SetRunOver(bool over)
         {
             _runOver.gameObject.SetActive(over);
+            if (over && _junctionPanel != null) _junctionPanel.SetActive(false);
             _runOver.text = over ? "RUN OVER" : "";
+        }
+
+        /// <summary>
+        /// District callout whenever the city biome changes: "ENTERING \u2014 NAME".
+        /// Uses the banner-free label so race banners and district changes never collide.
+        /// </summary>
+        public void ShowLocation(string themeName)
+        {
+            if (string.IsNullOrEmpty(themeName) || _location == null) return;
+            if (_locationRoutine != null) StopCoroutine(_locationRoutine);
+            _locationRoutine = StartCoroutine(LocationRoutine(themeName.ToUpperInvariant()));
+        }
+
+        private IEnumerator LocationRoutine(string themeName)
+        {
+            _location.text = "\u2014  ENTERING  " + themeName + "  \u2014";
+            _location.color = Color.white;
+            _location.gameObject.SetActive(true);
+            var group = _location.gameObject.GetComponent<CanvasGroup>();
+            if (group == null) group = _location.gameObject.AddComponent<CanvasGroup>();
+            float t = 0f;
+            while (t < 0.3f)
+            {
+                t += Time.unscaledDeltaTime;
+                group.alpha = Mathf.Clamp01(t / 0.3f);
+                yield return null;
+            }
+            yield return new WaitForSecondsRealtime(1.9f);
+            t = 0f;
+            while (t < 0.5f)
+            {
+                t += Time.unscaledDeltaTime;
+                group.alpha = 1f - Mathf.Clamp01(t / 0.5f);
+                yield return null;
+            }
+            _location.gameObject.SetActive(false);
+            group.alpha = 1f;
         }
 
         public void Flash(Color color, float duration)

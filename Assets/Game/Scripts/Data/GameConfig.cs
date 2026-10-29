@@ -54,6 +54,18 @@ namespace NeonVelocity.Core
         public bool starter;
         public string accentHex;
         public string perkLabel = "COSMETIC";
+        [Header("Premium entitlement")]
+        public bool premium;
+        public string premiumProductId;
+        public int premiumPriceGems;
+        [Header("Signature ability")]
+        public string abilityId;
+        public string abilityName;
+        public string abilityDescription;
+        public float abilityCooldown = 22f;
+        public float abilityDuration = 1.4f;
+        [Range(0.9f, 1.1f)] public float speedBias = 1f;
+        [Range(0f, 1f)] public float defenseBias;
     }
 
     [CreateAssetMenu(menuName = "NEON VELOCITY/Game Config", fileName = "GameConfig")]
@@ -132,9 +144,17 @@ namespace NeonVelocity.Core
 
         public ThemeDefinition Theme(int index)
         {
-            if (themes.Count == 0) return null;
+            if (themes == null || themes.Count == 0) return null;
             return themes[Mathf.Abs(index) % themes.Count];
         }
+
+        public ThemeDefinition LocationTheme(int zoneIndex)
+        {
+            if (themes == null || themes.Count == 0) return null;
+            return themes[LocationCatalog.Wrap(zoneIndex) % themes.Count];
+        }
+
+        public LocationDefinition Location(int zoneIndex) => LocationCatalog.Get(zoneIndex);
 
         public SpeedModel CreateSpeedModel() =>
             new SpeedModel(baseSpeed, maxSpeed, accelerationPerSecond, accelerationPerDistance);
@@ -155,9 +175,10 @@ namespace NeonVelocity.Core
             if (config.trails == null) config.trails = new List<TrailDefinition>();
             if (config.themes == null) config.themes = new List<ThemeDefinition>();
             if (config.characters.Count == 0) BuildCharacters(config);
+            EnsurePremiumCharacters(config);
             if (config.powerUps.Count == 0) BuildPowerUps(config);
             if (config.trails.Count == 0) BuildTrails(config);
-            if (config.themes.Count == 0) BuildThemes(config);
+            if (config.themes.Count != LocationCatalog.Count) BuildThemes(config);
         }
 
         private static void BuildCharacters(GameConfig config)
@@ -182,6 +203,126 @@ namespace NeonVelocity.Core
                 "The first synthetic runner cleared for the open grid. Still deciding what speed means.",
                 "Beyond spec. Beyond limits.", Palette.Lime, Element("#111F22"), Palette.Lime,
                 9000, 10, 4, false, "#B6FF3B"));
+        }
+
+        /// <summary>
+        /// Two server-entitled premium runners. They are sidegrades, not upgrades: Phantom X
+        /// trades raw durability for a short phase dash, Nova Titan trades top speed for one
+        /// emergency shield charge and a hazard-clearing burst. Neither changes rewards.
+        /// </summary>
+        private static void EnsurePremiumCharacters(GameConfig config)
+        {
+            if (config.characters == null) config.characters = new List<CharacterDefinition>();
+            bool hasPhantom = false, hasNova = false, hasEcho = false, hasSable = false, hasHelios = false;
+            for (int i = 0; i < config.characters.Count; i++)
+            {
+                if (config.characters[i] == null) continue;
+                if (config.characters[i].id == "phantom") hasPhantom = true;
+                if (config.characters[i].id == "nova") hasNova = true;
+                if (config.characters[i].id == "echo") hasEcho = true;
+                if (config.characters[i].id == "sable") hasSable = true;
+                if (config.characters[i].id == "helios") hasHelios = true;
+            }
+
+            if (!hasPhantom)
+            {
+                var phantom = Make<CharacterDefinition>("phantom", "PHANTOM X", "STEALTH PROTOTYPE",
+                    "A black-budget phase frame. Its wake bends light around the runner for a heartbeat.",
+                    "Gone before the grid renders you.", Palette.Violet, Element("#090C18"), Palette.Cyan,
+                    0, 1, 5, false, "#A78BFA");
+                phantom.premium = true;
+                phantom.premiumProductId = "char_phantom_x";
+                phantom.premiumPriceGems = 450;
+                phantom.abilityId = "phase_dash";
+                phantom.abilityName = "PHASE DASH";
+                phantom.abilityDescription = "Become untouchable for 1.5 s and surge forward. 20 s cooldown.";
+                phantom.abilityCooldown = 20f;
+                phantom.abilityDuration = 1.5f;
+                phantom.speedBias = 1.02f;
+                phantom.defenseBias = 0f;
+                phantom.perkLabel = "STEALTH // PHASE DASH";
+                config.characters.Add(phantom);
+            }
+
+            if (!hasNova)
+            {
+                var nova = Make<CharacterDefinition>("nova", "NOVA TITAN", "HEAVY ASSAULT FRAME",
+                    "A siege-class courier wrapped in reactor plate. Nova does not dodge the storm; it answers.",
+                    "Slow to turn. Impossible to stop.", Palette.Orange, Element("#1B1210"), Palette.Amber,
+                    0, 1, 6, false, "#FF8A3D");
+                nova.premium = true;
+                nova.premiumProductId = "char_nova_titan";
+                nova.premiumPriceGems = 700;
+                nova.abilityId = "nova_burst";
+                nova.abilityName = "NOVA BURST";
+                nova.abilityDescription = "Detonate a shockwave that clears nearby hazards. Starts with one shield charge.";
+                nova.abilityCooldown = 24f;
+                nova.abilityDuration = 1.2f;
+                nova.speedBias = 0.98f;
+                nova.defenseBias = 1f;
+                nova.perkLabel = "ARMOURED // NOVA BURST";
+                config.characters.Add(nova);
+            }
+
+            if (!hasEcho)
+            {
+                var echo = Make<CharacterDefinition>("echo", "ECHO", "SONAR PATHFINDER",
+                    "A survey frame rebuilt around a resonance array. Echo maps the grid by listening to it.",
+                    "The grid speaks. Echo answers.", Palette.Cyan, Element("#0D1B22"), Palette.Lime,
+                    0, 1, 7, false, "#5EF2D6");
+                echo.premium = true;
+                echo.premiumProductId = "char_echo";
+                echo.premiumPriceGems = 520;
+                echo.abilityId = "echo_pulse";
+                echo.abilityName = "ECHO PULSE";
+                echo.abilityDescription = "Broadcast a sonar pulse that magnetises every credit in a 16 m radius for 5 s. 18 s cooldown.";
+                echo.abilityCooldown = 18f;
+                echo.abilityDuration = 1f;
+                echo.speedBias = 1f;
+                echo.defenseBias = 0.5f;
+                echo.perkLabel = "SURVEY // ECHO PULSE";
+                config.characters.Add(echo);
+            }
+
+            if (!hasSable)
+            {
+                var sable = Make<CharacterDefinition>("sable", "SABLE", "NIGHT COURIER",
+                    "A blackout specialist with a mirrored chassis. Sable is only visible when the rain catches her edge.",
+                    "No signal. No shadow. No trail.", Palette.Violet, Element("#0B0712"), Palette.Magenta,
+                    0, 1, 8, false, "#C084FC");
+                sable.premium = true;
+                sable.premiumProductId = "char_sable";
+                sable.premiumPriceGems = 620;
+                sable.abilityId = "night_veil";
+                sable.abilityName = "NIGHT VEIL";
+                sable.abilityDescription = "Collapse into a shadow state for 2.2 s, ignoring every hazard without a speed surge. 26 s cooldown.";
+                sable.abilityCooldown = 26f;
+                sable.abilityDuration = 2.2f;
+                sable.speedBias = 1.01f;
+                sable.defenseBias = 0f;
+                sable.perkLabel = "STEALTH // NIGHT VEIL";
+                config.characters.Add(sable);
+            }
+
+            if (!hasHelios)
+            {
+                var helios = Make<CharacterDefinition>("helios", "HELIOS", "SOLAR BULWARK",
+                    "A rescue frame plated with photovoltaic armour. Helios carries daylight into districts that have forgotten the sun.",
+                    "Stand in the light. Share it.", Palette.Amber, Element("#241505"), Palette.Orange,
+                    0, 1, 9, false, "#FFB020");
+                helios.premium = true;
+                helios.premiumProductId = "char_helios";
+                helios.premiumPriceGems = 760;
+                helios.abilityId = "solar_aegis";
+                helios.abilityName = "SOLAR AEGIS";
+                helios.abilityDescription = "Forge a solar shield that absorbs one crash and grants 1.5 s of protection. 24 s cooldown.";
+                helios.abilityCooldown = 24f;
+                helios.abilityDuration = 1.5f;
+                helios.speedBias = 0.99f;
+                helios.defenseBias = 0.75f;
+                helios.perkLabel = "AEGIS // SOLAR SHIELD";
+                config.characters.Add(helios);
+            }
         }
 
         private static void BuildPowerUps(GameConfig config)
@@ -224,34 +365,32 @@ namespace NeonVelocity.Core
 
         private static void BuildThemes(GameConfig config)
         {
-            config.themes.Add(new ThemeDefinition
+            config.themes.Clear();
+            for (int i = 0; i < LocationCatalog.Count; i++)
             {
-                id = "neon-sprawl", displayName = "NEON SPRAWL", accent = Palette.Cyan,
-                skyTop = Element("#071227"), skyBottom = Element("#241650"), fog = Element("#0A1830"),
-                ground = Element("#0B1424"), buildingA = Element("#12243A"), buildingB = Element("#1B1638"),
-                rain = true, ambientLabel = "CITY RAIN"
-            });
-            config.themes.Add(new ThemeDefinition
-            {
-                id = "skyway", displayName = "SKYWAY 09", accent = Palette.Amber,
-                skyTop = Element("#2A1438"), skyBottom = Element("#FF7A4D"), fog = Element("#52243B"),
-                ground = Element("#241B26"), buildingA = Element("#3B2539"), buildingB = Element("#58293D"),
-                rain = false, ambientLabel = "HIGH ALTITUDE WIND"
-            });
-            config.themes.Add(new ThemeDefinition
-            {
-                id = "reactor", displayName = "REACTOR BELT", accent = Palette.Lime,
-                skyTop = Element("#06110E"), skyBottom = Element("#112B1A"), fog = Element("#0C2018"),
-                ground = Element("#111914"), buildingA = Element("#1C2A20"), buildingB = Element("#24321B"),
-                rain = false, ambientLabel = "REACTOR HUM"
-            });
-            config.themes.Add(new ThemeDefinition
-            {
-                id = "ghost-tunnel", displayName = "GHOST TUNNEL", accent = Palette.Violet,
-                skyTop = Element("#08040F"), skyBottom = Element("#1C0E33"), fog = Element("#120A22"),
-                ground = Element("#100C1B"), buildingA = Element("#1C1430"), buildingB = Element("#291B42"),
-                rain = false, ambientLabel = "TUNNEL ECHO"
-            });
+                var location = LocationCatalog.All[i];
+                config.themes.Add(new ThemeDefinition
+                {
+                    id = location.id,
+                    displayName = location.displayName,
+                    accent = Palette.Hex(location.accentHex),
+                    skyTop = Palette.Hex(location.skyTopHex),
+                    skyBottom = Palette.Hex(location.skyBottomHex),
+                    fog = Palette.Hex(location.fogHex),
+                    ground = Palette.Hex(location.groundHex),
+                    buildingA = Palette.Hex(location.buildingAHex),
+                    buildingB = Palette.Hex(location.buildingBHex),
+                    rain = location.rain,
+                    ambientLabel = location.ambientLabel,
+                    styleIndex = location.style,
+                    signature = location.signature,
+                    hazardBias = location.hazardBias,
+                    subtitle = location.subtitle,
+                    themeName = location.themeName,
+                    weather = location.weather,
+                    timeOfDay = location.timeOfDay
+                });
+            }
         }
 
         private static T Make<T>(string id, string displayName, string callsign, string bio, string tagline,
@@ -312,5 +451,18 @@ namespace NeonVelocity.Core
         public Color buildingB;
         public bool rain;
         public string ambientLabel;
+        public int styleIndex;
+        public int signature;
+        public int hazardBias;
+        public string subtitle;
+        /// <summary>The named biome archetype, e.g. "SNOWY MOUNTAIN HIGHWAY".</summary>
+        public string themeName;
+        /// <summary>0 clear, 1 rain, 2 snow, 3 dust, 4 embers, 5 fog.</summary>
+        public int weather;
+        /// <summary>0 Early Morning, 1 Morning, 2 Afternoon, 3 Evening, 4 Sunset, 5 Night, 6 Late Night.</summary>
+        public int timeOfDay;
+
+        public bool HasPrecipitation => weather == 1 || weather == 2;
+        public float WeatherIntensity => weather == 0 ? 0f : weather == 5 ? 0.55f : 1f;
     }
 }

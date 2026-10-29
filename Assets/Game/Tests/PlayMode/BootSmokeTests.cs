@@ -121,5 +121,118 @@ namespace NeonVelocity.Tests
             yield return null;
             Assert.IsFalse(app.IsInRun, "Session did not shut down");
         }
+
+        [UnityTest]
+        public IEnumerator PremiumRunnerAbility_ActivatesWithCooldown()
+        {
+            float deadline = Time.realtimeSinceStartup + 15f;
+            while (GameApp.Instance == null && Time.realtimeSinceStartup < deadline)
+                yield return null;
+            Assert.IsNotNull(GameApp.Instance, "GameApp did not bootstrap");
+            var app = GameApp.Instance;
+            app.ShowMainMenu();
+            yield return null;
+
+            string previousCharacter = app.Profile.selectedCharacter;
+            bool wasUnlocked = app.Profile.unlockedCharacters.Contains("phantom");
+            try
+            {
+                if (!wasUnlocked) app.Profile.unlockedCharacters.Add("phantom");
+                app.Progression.SelectCharacter("phantom");
+
+                app.StartMode(GameModeId.Practice);
+                deadline = Time.realtimeSinceStartup + 10f;
+                while (!app.IsInRun && Time.realtimeSinceStartup < deadline)
+                    yield return null;
+                Assert.IsTrue(app.IsInRun, "Practice session did not start");
+                var runner = app.Session.Runner;
+                Assert.IsNotNull(runner);
+                Assert.AreEqual("phantom", app.Profile.selectedCharacter);
+                Assert.AreEqual("phase_dash", runner.AbilityId, "PHANTOM X must equip PHASE DASH");
+                Assert.IsTrue(runner.HasAbility);
+
+                deadline = Time.realtimeSinceStartup + 8f;
+                while (!runner.Running && Time.realtimeSinceStartup < deadline)
+                    yield return null;
+                Assert.IsTrue(runner.Running, "Race did not start");
+
+                runner.ActivateAbility();
+                yield return null;
+                Assert.IsTrue(runner.AbilityActive, "Activating PHASE DASH must enter the active state");
+                Assert.Greater(runner.AbilityCooldownRemaining, 0f, "Ability must start its cooldown");
+                Assert.GreaterOrEqual(runner.AbilityCooldownDuration, 8f, "Cooldowns are clamped to a fair minimum");
+
+                float cooldownAfterFirst = runner.AbilityCooldownRemaining;
+                runner.ActivateAbility();
+                Assert.AreEqual(cooldownAfterFirst, runner.AbilityCooldownRemaining, 0.0001f,
+                    "Repeated presses must not stack or refresh the ability");
+            }
+            finally
+            {
+                if (wasUnlocked)
+                {
+                    if (!app.Profile.unlockedCharacters.Contains("phantom"))
+                        app.Profile.unlockedCharacters.Add("phantom");
+                }
+                else app.Profile.unlockedCharacters.Remove("phantom");
+                if (!app.Profile.unlockedCharacters.Contains(previousCharacter))
+                    app.Profile.unlockedCharacters.Add(previousCharacter);
+                app.Progression.SelectCharacter(previousCharacter);
+                app.EndSession(false);
+                app.ShowMainMenu();
+            }
+            yield return null;
+        }
+
+        [UnityTest]
+        public IEnumerator Revive_RestoresExactDistanceWithoutResettingTheRun()
+        {
+            float deadline = Time.realtimeSinceStartup + 15f;
+            while (GameApp.Instance == null && Time.realtimeSinceStartup < deadline)
+                yield return null;
+            Assert.IsNotNull(GameApp.Instance, "GameApp did not bootstrap");
+            var app = GameApp.Instance;
+            app.ShowMainMenu();
+            yield return null;
+
+            app.StartMode(GameModeId.Practice);
+            deadline = Time.realtimeSinceStartup + 10f;
+            while (!app.IsInRun && Time.realtimeSinceStartup < deadline)
+                yield return null;
+            Assert.IsTrue(app.IsInRun, "Practice session did not start");
+            var runner = app.Session.Runner;
+            Assert.IsNotNull(runner);
+
+            deadline = Time.realtimeSinceStartup + 8f;
+            while (!runner.Running && Time.realtimeSinceStartup < deadline)
+                yield return null;
+            Assert.IsTrue(runner.Running, "Race did not start");
+            app.Session.Track.ClearHazardsAround(runner.PlayerZ, 80f);
+            yield return null;
+
+            var crash = runner.CaptureReviveState();
+            Assert.Greater(crash.Distance, 0f, "Run must have advanced before the revive snapshot");
+            float distanceAtDeath = runner.Distance;
+            int scoreAtDeath = runner.Score;
+            runner.Kill();
+            yield return null;
+            Assert.IsTrue(runner.IsDead, "Kill must stop the runner");
+            Assert.IsFalse(runner.Running);
+
+            runner.ReviveAt(crash, 3f);
+            Assert.IsFalse(runner.IsDead, "Revive must clear the death state");
+            Assert.IsTrue(runner.Running, "Revive must resume the same run");
+            Assert.AreEqual(distanceAtDeath, runner.Distance, 0.01f,
+                "Revive must resume at the exact death distance, not the start line");
+            Assert.AreEqual(crash.Lane, runner.Lane, "Revive must preserve the lane");
+            Assert.That(runner.Score, Is.GreaterThanOrEqualTo(scoreAtDeath),
+                "Revive must not erase distance or score accumulated before the crash");
+            Assert.Greater(app.Session.Distance, 0f, "Revive must not reset world progression");
+            yield return null;
+
+            app.EndSession(false);
+            app.ShowMainMenu();
+            yield return null;
+        }
     }
 }

@@ -26,7 +26,7 @@ namespace NeonVelocity.UI
             _ui = ui;
             var root = (RectTransform)transform;
             ScreenKit.Backdrop(root, UITheme.Cyan);
-            ScreenKit.Header(root, app, "SOLO", "RUN SELECT", "Eleven protocols. One grid. Choose your line.",
+            ScreenKit.Header(root, app, "SOLO", "RUN SELECT", GameModes.All.Count + " protocols. One grid. Choose your line.",
                 UITheme.Cyan, app.NavigateBack);
 
             UITheme.Scroll(root, "Mode Scroll", out RectTransform content);
@@ -115,7 +115,7 @@ namespace NeonVelocity.UI
             _app.Audio.PlayUiClick();
             string body = mode.Rules + "\n\nOBJECTIVE\n" + mode.Objective +
                           "\n\nMODE FACTORS\nSPEED x" + mode.SpeedMultiplier.ToString("0.00") +
-                          "   CREDITS x" + mode.CoinMultiplier.ToString("0.00") +
+                        "   CREDITS x" + mode.CoinMultiplier.ToString("0.00") +
                           (mode.IsOnline ? "\nPLAYERS " + mode.MaxPlayers + "   SERVER-AUTHORITATIVE" : "");
             _ui.ShowModal(mode.Title, body, mode.IsOnline ? "LOBBY" : "START", () => Launch(mode));
         }

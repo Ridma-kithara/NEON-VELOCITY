@@ -219,6 +219,59 @@ namespace NeonVelocity.Utilities
             }
         }
 
+        private static Sprite _panelBorderSprite;
+
+        /// <summary>
+        /// 9-sliced "glass card" frame: crisp outer hairline, technical corner accents and
+        /// a faint top-edge highlight. Interior stays fully transparent so panels stack
+        /// content freely. Tint with UITheme hairline colours.
+        /// </summary>
+        public static Sprite PanelBorder
+        {
+            get
+            {
+                if (_panelBorderSprite != null) return _panelBorderSprite;
+                int size = 128;
+                int clip = 26; // 9-slice border in pixels — corners survive scaling untouched.
+                var tex = new Texture2D(size, size, TextureFormat.RGBA32, false)
+                {
+                    name = "NV_PanelBorder",
+                    wrapMode = TextureWrapMode.Clamp,
+                    filterMode = FilterMode.Bilinear
+                };
+                var pixels = new Color32[size * size];
+                for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float px = x + 0.5f;
+                    float py = y + 0.5f;
+                    float left = px;
+                    float right = size - px;
+                    float bottom = py;
+                    float top = size - py;
+                    float edge = Mathf.Min(Mathf.Min(left, right), Mathf.Min(bottom, top));
+                    float a = 0f;
+                    // Outer 1px hairline.
+                    if (edge < 1.4f) a = Mathf.Max(a, 0.78f * Mathf.Clamp01(1.4f - edge + 0.4f));
+                    // Accent brackets: within the corner clip regions the frame thickens
+                    // and brightens, producing technical L-shaped accents at 4 corners.
+                    if ((left < clip || right < clip) && (bottom < clip || top < clip) && edge < 3.4f)
+                        a = Mathf.Max(a, 0.95f);
+                    // Top-edge sheen: brightest line fades as it goes down, giving glass.
+                    if (top < 6f && edge >= 1.4f)
+                        a = Mathf.Max(a, 0.30f * Mathf.Clamp01(1f - top / 6f));
+                    byte v = (byte)(a * 255f);
+                    pixels[y * size + x] = new Color32(255, 255, 255, v);
+                }
+                tex.SetPixels32(pixels);
+                tex.Apply(false, true);
+                _panelBorderSprite = Sprite.Create(tex, new Rect(0, 0, size, size), new Vector2(0.5f, 0.5f),
+                    100f, 0, SpriteMeshType.FullRect, new Vector4(clip, clip, clip, clip));
+                _panelBorderSprite.name = "NV_PanelBorder";
+                return _panelBorderSprite;
+            }
+        }
+
         public static Texture2D VerticalGradient(string name, Color bottom, Color top, int height = 256)
         {
             var tex = new Texture2D(4, height, TextureFormat.RGBA32, false)
@@ -422,6 +475,94 @@ namespace NeonVelocity.Utilities
             return grain + brushed - scratch * 0.05f + (1f - seam) * 0.008f;
         }
 
+        private static Texture2D _carbonSurface;
+        private static Texture2D _carbonNormal;
+
+        /// <summary>
+        /// Tileable 2x2 carbon-fibre twill. Neutral grey so material tints and emission read
+        /// through; the weave isolates the characteristic alternating twill rows under rim
+        /// light. Used by the runner under-suit and premium machine panelling.
+        /// </summary>
+        public static Texture2D CarbonSurface()
+        {
+            if (_carbonSurface != null) return _carbonSurface;
+            const int size = 128;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true)
+            {
+                name = "NV_CarbonSurface",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                anisoLevel = 4
+            };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                // 16x16 twill cell: two warp/weft per luminance box, offset by one per row.
+                float cell = 16f;
+                int bx = Mathf.FloorToInt(x / cell), by = Mathf.FloorToInt(y / cell);
+                float fx = (x % cell) / cell, fy = (y % cell) / cell;
+                bool warp = ((bx % 2) + (by % 4) * 2) % 2 == 0;
+                float ridge = warp ? SmoothPeak(fy) : SmoothPeak(fx);
+                float peak = Mathf.Max(SmoothPeak(fx), SmoothPeak(fy)) * 0.55f + 0.45f;
+                float v = (ridge * 0.34f + 0.6f) * peak * 2.2f;
+                v += (Hash01(x, y, 417) - 0.5f) * 0.05f;
+                byte l = (byte)(Mathf.Clamp01(v) * 245f);
+                pixels[y * size + x] = new Color32(l, l, (byte)Mathf.Min(255, l + 3), 255);
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            _carbonSurface = tex;
+            return tex;
+        }
+
+        /// <summary>Tangent-space normal of the twill weave — gives machine parts their fabric roughness.</summary>
+        public static Texture2D CarbonNormal()
+        {
+            if (_carbonNormal != null) return _carbonNormal;
+            const int size = 128;
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true, true)
+            {
+                name = "NV_CarbonNormal",
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                anisoLevel = 4
+            };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float cx = CarbonNormalFiber(x, y, size);
+                float dx = CarbonNormalFiber(x + 1, y, size) - CarbonNormalFiber(x + size - 1, y, size);
+                float dy = CarbonNormalFiber(x, y + 1, size) - CarbonNormalFiber(x, y + size - 1, size);
+                Vector3 n = new Vector3(-dx * 2.2f, -dy * 2.2f, 1f).normalized;
+                float em = (cx - 0.5f) * 0.25f;
+                pixels[y * size + x] = new Color32(
+                    (byte)((n.x * 0.5f + 0.5f + em) * 255f),
+                    (byte)((n.y * 0.5f + 0.5f - em) * 255f),
+                    (byte)((n.z * 0.5f + 0.5f) * 255f), 255);
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            _carbonNormal = tex;
+            return tex;
+        }
+
+        private static float CarbonNormalFiber(int x, int y, int size)
+        {
+            float cell = 16f;
+            int bx = Mathf.FloorToInt((x % size) / cell), by = Mathf.FloorToInt((y % size) / cell);
+            float fx = ((x % size) % cell) / cell, fy = ((y % size) % cell) / cell;
+            bool warp = ((bx % 2) + (by % 4) * 2) % 2 == 0;
+            return 0.35f + (warp ? SmoothPeak(fy) : SmoothPeak(fx)) * 0.65f;
+        }
+
+        private static float SmoothPeak(float t)
+        {
+            t = t - Mathf.Floor(t);
+            return Mathf.Cos(t * Mathf.PI * 2f) * -0.5f + 0.5f;
+        }
+
         /// <summary>Tileable concrete/metal-deck albedo with panel seams and damp stains.</summary>
         public static Texture2D Concrete(int seed, int size = 256)
         {
@@ -448,6 +589,99 @@ namespace NeonVelocity.Utilities
                 if (stain > 0.55f) value *= Mathf.Lerp(1f, 0.72f, (stain - 0.55f) * 2.2f);
                 byte v = (byte)(Mathf.Clamp01(value) * 255f);
                 pixels[y * size + x] = new Color32(v, v, (byte)Mathf.Min(255, v + 4), 255);
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            return tex;
+        }
+
+        /// <summary>Tileable wood planking: plank bands, grain streaks, knots-seam shading.</summary>
+        public static Texture2D WoodPlanks(int seed, int size = 256)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true)
+            {
+                name = "NV_Wood_" + seed,
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                anisoLevel = 4
+            };
+            var pixels = new Color32[size * size];
+            int plank = size / 6;
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float nx = x / (float)size;
+                float ny = y / (float)size;
+                int band = y / plank;
+                float fy = y % plank / (float)plank;
+                float grain = Mathf.Sin((x * (0.55f + Fbm(nx, ny, 9, seed + band) * 2.4f))
+                                        + Fbm(nx * 0.4f, ny * 3f, 5, seed + band * 3) * 6f) * 0.5f + 0.5f;
+                float value = 0.42f + Fbm(nx * 3f, ny, 12, seed + 3) * 0.14f + grain * 0.12f;
+                value *= Mathf.Lerp(0.68f, 1f, Mathf.Clamp01(fy * 8f));
+                value *= Mathf.Lerp(1f, 0.86f, Mathf.Clamp01((1f - fy) * 10f));
+                value *= 1f - Mathf.Clamp01((band % 3) * 0.06f);
+                byte v = (byte)(Mathf.Clamp01(value) * 255f);
+                pixels[y * size + x] = new Color32(v, (byte)Mathf.Min(255, v * 0.82f + 6),
+                    (byte)(v * 0.58f), 255);
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            return tex;
+        }
+
+        /// <summary>Tileable sandstone/stucco: layered drifts, ripple dunes, eroded blotches.</summary>
+        public static Texture2D Sandstone(int seed, int size = 256)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true)
+            {
+                name = "NV_Sand_" + seed,
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                anisoLevel = 6
+            };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float nx = x / (float)size;
+                float ny = y / (float)size;
+                float ripple = Mathf.Sin((ny * 34f) + Fbm(nx, ny, 6, seed) * 9f) * 0.5f + 0.5f;
+                float value = 0.52f + Fbm(nx, ny, 7, seed + 41) * 0.2f + ripple * 0.13f
+                                      + Fbm(nx, ny, 47, seed + 77) * 0.06f;
+                float blotch = Fbm(nx * 2.2f, ny * 2.2f, 5, seed + 97);
+                if (blotch > 0.6f) value *= Mathf.Lerp(1f, 0.82f, (blotch - 0.6f) * 2.5f);
+                byte v = (byte)(Mathf.Clamp01(value) * 255f);
+                pixels[y * size + x] = new Color32((byte)Mathf.Min(255, v + 10),
+                    (byte)(v * 0.94f + 4), (byte)(v * 0.78f), 255);
+            }
+            tex.SetPixels32(pixels);
+            tex.Apply(true, true);
+            return tex;
+        }
+
+        /// <summary>Tileable packed snow field: drifts, footprint debris, crisp sparkle noise.</summary>
+        public static Texture2D SnowSurface(int seed, int size = 256)
+        {
+            var tex = new Texture2D(size, size, TextureFormat.RGBA32, true)
+            {
+                name = "NV_Snow_" + seed,
+                wrapMode = TextureWrapMode.Repeat,
+                filterMode = FilterMode.Bilinear,
+                anisoLevel = 6
+            };
+            var pixels = new Color32[size * size];
+            for (int y = 0; y < size; y++)
+            for (int x = 0; x < size; x++)
+            {
+                float nx = x / (float)size;
+                float ny = y / (float)size;
+                float drift = Fbm(nx, ny, 9, seed + 13) * 0.14f;
+                float sparkle = (Hash01(x, y, seed + 5) - 0.5f) * 0.05f;
+                float shadow = Fbm(nx, ny, 3, seed + 61) * 0.1f;
+                float value = 0.8f + drift + sparkle - shadow * 0.4f;
+                value = Mathf.Clamp01(value) * Mathf.Lerp(0.9f, 1f, drift * 5f);
+                byte v = (byte)(Mathf.Clamp01(value) * 255f);
+                pixels[y * size + x] = new Color32(v, (byte)Mathf.Min(255, v + 2), 255, 255);
             }
             tex.SetPixels32(pixels);
             tex.Apply(true, true);

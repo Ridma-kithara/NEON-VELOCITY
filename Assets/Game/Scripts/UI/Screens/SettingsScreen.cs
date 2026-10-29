@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using NeonVelocity.Core;
+using NeonVelocity.Premium;
 using NeonVelocity.Utilities;
 using UnityEngine;
 using UnityEngine.UI;
@@ -18,6 +19,7 @@ namespace NeonVelocity.UI
         private InputField _nameField;
         private InputField _hostField;
         private InputField _portField;
+        private InputField _premiumUrlField;
         private Text _presetLabel;
         private Text _resolutionLabel;
         private Text _displayModeLabel;
@@ -29,6 +31,9 @@ namespace NeonVelocity.UI
         private Text _aaLabel;
         private Text _effectsLabel;
         private Text _viewDistanceLabel;
+        private Text _todModeLabel;
+        private Text _todPhaseLabel;
+        private Text _todCycleLabel;
         private readonly List<Vector2Int> _resolutions = new List<Vector2Int>();
         private readonly List<string> _displayModes = new List<string>();
         private readonly Button[] _presetButtons = new Button[5];
@@ -59,6 +64,7 @@ namespace NeonVelocity.UI
             BuildAudio(content);
             BuildInput(content);
             BuildVideo(content);
+            BuildTimeOfDay(content);
             BuildAccessibility(content);
             BuildNetwork(content);
 
@@ -116,19 +122,24 @@ namespace NeonVelocity.UI
         private void BuildAudio(RectTransform content)
         {
             var panel = Section(content, "AUDIO", "Original synthesized soundtrack and effects.",
-                UITheme.Magenta, 300f);
+                UITheme.Magenta, 358f);
             var s = _app.Profile.settings;
-            AddSlider(panel.transform, "MUSIC", s.musicVolume, 0, UITheme.Magenta, value =>
+            AddSlider(panel.transform, "MASTER", s.masterVolume, 0, UITheme.White, value =>
+            {
+                s.masterVolume = value;
+                _app.ApplySettings(false);
+            });
+            AddSlider(panel.transform, "MUSIC", s.musicVolume, 1, UITheme.Magenta, value =>
             {
                 s.musicVolume = value;
                 _app.ApplySettings(false);
             });
-            AddSlider(panel.transform, "EFFECTS", s.sfxVolume, 1, UITheme.Cyan, value =>
+            AddSlider(panel.transform, "EFFECTS", s.sfxVolume, 2, UITheme.Cyan, value =>
             {
                 s.sfxVolume = value;
                 _app.ApplySettings(false);
             });
-            AddSlider(panel.transform, "AMBIENCE", s.ambienceVolume, 2, UITheme.Violet, value =>
+            AddSlider(panel.transform, "AMBIENCE", s.ambienceVolume, 3, UITheme.Violet, value =>
             {
                 s.ambienceVolume = value;
                 _app.ApplySettings(false);
@@ -425,6 +436,13 @@ namespace NeonVelocity.UI
                 _effectsLabel.text = s.effectsQuality <= 0 ? "LOW" : s.effectsQuality == 1 ? "MEDIUM" : "HIGH";
             if (_viewDistanceLabel != null)
                 _viewDistanceLabel.text = s.viewDistance <= 0 ? "NEAR" : s.viewDistance == 1 ? "STANDARD" : "FAR";
+            if (_todModeLabel != null)
+                _todModeLabel.text = s.timeOfDayMode == 1 ? "DYNAMIC"
+                    : s.timeOfDayMode == 2 ? "FIXED" : "LOCATION";
+            if (_todPhaseLabel != null)
+                _todPhaseLabel.text = TimeOfDayCatalog.Label(s.timeOfDayPhase);
+            if (_todCycleLabel != null)
+                _todCycleLabel.text = Mathf.RoundToInt(s.timeOfDayCycleMetres / 1_000f) + " KM";
         }
 
         private static string PresetName(int preset)
@@ -446,6 +464,60 @@ namespace NeonVelocity.UI
             if (width == 3840 && height == 2160) return "3840 \u00D7 2160  (4K UHD)";
             if (width == 2560 && height == 1440) return "2560 \u00D7 1440  (QHD)";
             return width + " \u00D7 " + height;
+        }
+
+        private void BuildTimeOfDay(RectTransform content)
+        {
+            var panel = Section(content, "TIME OF DAY",
+                "Authored uses each location's own phase. Dynamic cycles all seven states with distance; fixed locks one phase.",
+                UITheme.Violet, 226f);
+            float top = 96f;
+            _todModeLabel = ChoiceRow(panel.transform, top, "MODE",
+                () => CycleTimeOfDayMode(-1), () => CycleTimeOfDayMode(1));
+            top += 44f;
+            _todPhaseLabel = ChoiceRow(panel.transform, top, "FIXED PHASE",
+                () => CycleTimeOfDayPhase(-1), () => CycleTimeOfDayPhase(1));
+            top += 44f;
+            _todCycleLabel = ChoiceRow(panel.transform, top, "DAY CYCLE",
+                () => CycleTimeOfDayCycle(-1), () => CycleTimeOfDayCycle(1));
+        }
+
+        private void CycleTimeOfDayMode(int direction)
+        {
+            var s = _app.Profile.settings;
+            s.timeOfDayMode = (s.timeOfDayMode + direction + 3) % 3;
+            _app.ApplySettings(false);
+            RefreshVideoLabels();
+        }
+
+        private void CycleTimeOfDayPhase(int direction)
+        {
+            var s = _app.Profile.settings;
+            s.timeOfDayPhase = (s.timeOfDayPhase + direction + TimeOfDayCatalog.Count) %
+                               TimeOfDayCatalog.Count;
+            // Adjusting the fixed phase is an explicit request to see that phase, so switch
+            // away from authored/dynamic rather than silently changing an unused field.
+            s.timeOfDayMode = 2;
+            _app.ApplySettings(false);
+            RefreshVideoLabels();
+        }
+
+        private void CycleTimeOfDayCycle(int direction)
+        {
+            float[] cycles = { 6_000f, 12_000f, 21_000f, 42_000f, 63_000f, 105_000f };
+            var s = _app.Profile.settings;
+            int index = 2;
+            float best = float.MaxValue;
+            for (int i = 0; i < cycles.Length; i++)
+            {
+                float delta = Mathf.Abs(cycles[i] - s.timeOfDayCycleMetres);
+                if (delta < best) { best = delta; index = i; }
+            }
+            index = (index + direction + cycles.Length) % cycles.Length;
+            s.timeOfDayCycleMetres = cycles[index];
+            s.timeOfDayMode = 1;
+            _app.ApplySettings(false);
+            RefreshVideoLabels();
         }
 
         private void BuildAccessibility(RectTransform content)
@@ -472,21 +544,33 @@ namespace NeonVelocity.UI
 
         private void BuildNetwork(RectTransform content)
         {
-            var panel = Section(content, "NETWORK", "Authoritative race server. Use the host's LAN address for local play.",
-                UITheme.Cyan, 236f);
+            var panel = Section(content, "NETWORK",
+                "Race authority and premium store endpoints. Loopback defaults are for local testing.",
+                UITheme.Cyan, 310f);
             var s = _app.Profile.settings;
             _hostField = UITheme.Input(panel.transform, "Host", s.serverHost, "127.0.0.1", UITheme.BodySize);
             UITheme.Anchor((RectTransform)_hostField.transform, new Vector2(0f, 0f), new Vector2(0.68f, 0f),
-                new Vector2(26f, 52f), new Vector2(-8f, 116f));
+                new Vector2(26f, 160f), new Vector2(-8f, 224f));
             _portField = UITheme.Input(panel.transform, "Port", s.serverPort.ToString(), "7777", UITheme.BodySize);
             UITheme.Anchor((RectTransform)_portField.transform, new Vector2(0.68f, 0f), new Vector2(1f, 0f),
-                new Vector2(8f, 52f), new Vector2(-26f, 116f));
+                new Vector2(8f, 160f), new Vector2(-26f, 224f));
+
+            var premiumLabel = UITheme.Label(panel.transform, "Premium Label",
+                "PREMIUM STORE URL  (HTTPS IN PRODUCTION)", UITheme.SmallSize, UITheme.Lime,
+                TextAnchor.MiddleLeft, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)premiumLabel.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
+                new Vector2(26f, 130f), new Vector2(-26f, 154f));
+            _premiumUrlField = UITheme.Input(panel.transform, "Premium URL", s.premiumServerUrl,
+                "https://premium.example.com", UITheme.BodySize);
+            _premiumUrlField.characterLimit = 300;
+            UITheme.Anchor((RectTransform)_premiumUrlField.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
+                new Vector2(26f, 60f), new Vector2(-26f, 124f));
 
             var note = UITheme.Label(panel.transform, "Note",
-                "Raw TCP multiplayer is available in macOS, Windows, iOS and Android builds. WebGL builds are offline-only.",
+                "Multiplayer uses raw TCP. The premium store requires the HTTPS service; offline or unreachable shows STORE OFFLINE.",
                 UITheme.SmallSize, UITheme.Muted, TextAnchor.MiddleLeft);
             UITheme.Anchor((RectTransform)note.transform, new Vector2(0f, 0f), new Vector2(1f, 0f),
-                new Vector2(26f, 14f), new Vector2(-26f, 48f));
+                new Vector2(26f, 12f), new Vector2(-26f, 48f));
         }
 
         private void AddSlider(Transform parent, string label, float value, int index, Color accent,
@@ -523,6 +607,17 @@ namespace NeonVelocity.UI
             if (_hostField != null) s.serverHost = string.IsNullOrWhiteSpace(_hostField.text)
                 ? "127.0.0.1" : _hostField.text.Trim();
             if (_portField != null && int.TryParse(_portField.text, out int port)) s.serverPort = port;
+            if (_premiumUrlField != null)
+            {
+                string premiumUrl = _premiumUrlField.text == null ? "" : _premiumUrlField.text.Trim();
+                if (!string.IsNullOrEmpty(premiumUrl) && !PremiumService.IsValidServerUrl(premiumUrl))
+                {
+                    _ui.Toast("PREMIUM URL MUST START WITH HTTP:// OR HTTPS://", UITheme.Red, 3.2f);
+                    return;
+                }
+                s.premiumServerUrl = string.IsNullOrEmpty(premiumUrl)
+                    ? "http://127.0.0.1:8088" : premiumUrl;
+            }
             _app.ApplySettings(true);
             _app.NavigateBack();
         }

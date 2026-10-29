@@ -5,59 +5,20 @@ namespace NeonVelocity.Core
 {
     public static class ProgressionMath
     {
-        public const int MaxPlayerLevel = 100;
+        public const int MaxPlayerLevel = LevelProgression.MaxLevel;
         public const int MaxUpgradeLevel = 5;
 
-        public static int XpRequiredForLevel(int level) => 450 + Math.Max(0, level - 1) * 220;
+        public static long XpRequiredForLevel(int level) => LevelProgression.RequirementForLevel(level);
+        public static long TotalXpForLevel(int level) => LevelProgression.TotalXpForLevel(level);
 
-        public static int TotalXpForLevel(int level)
-        {
-            int total = 0;
-            for (int i = 1; i < level; i++) total += XpRequiredForLevel(i);
-            return total;
-        }
+        /// <summary>Adds XP and returns the number of levels gained. Overflow-safe.</summary>
+        public static int AddXp(ref long totalXp, long amount, out int newLevel) =>
+            LevelProgression.AddXp(ref totalXp, amount, out newLevel);
 
-        /// <summary>Adds XP and returns the number of levels gained.</summary>
-        public static int AddXp(ref int xp, int amount, out int newLevel)
-        {
-            if (amount < 0) amount = 0;
-            int before = LevelFromXp(xp);
-            xp = Math.Max(0, xp + amount);
-            int level = LevelFromXp(xp);
-            newLevel = level;
-            return Math.Max(0, level - before);
-        }
-
-        public static int LevelFromXp(int xp)
-        {
-            int level = 1;
-            int remaining = Math.Max(0, xp);
-            while (level < MaxPlayerLevel && remaining >= XpRequiredForLevel(level))
-            {
-                remaining -= XpRequiredForLevel(level);
-                level++;
-            }
-            return level;
-        }
-
-        public static int XpIntoCurrentLevel(int xp)
-        {
-            int remaining = Math.Max(0, xp);
-            int level = 1;
-            while (level < MaxPlayerLevel && remaining >= XpRequiredForLevel(level))
-            {
-                remaining -= XpRequiredForLevel(level);
-                level++;
-            }
-            return remaining;
-        }
-
-        public static float LevelProgress(int xp)
-        {
-            int level = LevelFromXp(xp);
-            if (level >= MaxPlayerLevel) return 1f;
-            return Math.Max(0f, Math.Min(1f, XpIntoCurrentLevel(xp) / (float)XpRequiredForLevel(level)));
-        }
+        public static int LevelFromXp(long totalXp) => LevelProgression.LevelForXp(totalXp);
+        public static long XpIntoCurrentLevel(long totalXp) => LevelProgression.XpIntoCurrentLevel(totalXp);
+        public static long XpToNextLevel(long totalXp) => LevelProgression.XpToNextLevel(totalXp);
+        public static float LevelProgress(long totalXp) => LevelProgression.LevelProgress(totalXp);
 
         public static int ScoreForRun(float distance, int coins, float multiplier, int bonus)
         {

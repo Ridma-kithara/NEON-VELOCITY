@@ -11,7 +11,7 @@ This guide covers opening the project, playing offline, running the authoritativ
 | Render pipeline | URP 17.6.0 (already in `Packages/manifest.json`) |
 | Input | Input System 1.20.0 (active input handling is set to Input System) |
 | UI | uGUI 2.6.0 |
-| Python | 3.9 or newer, standard library only, for multiplayer |
+| Python | 3.9 or newer, standard library only, for multiplayer and the premium store |
 | OS (editor) | macOS/Windows/Linux supported by the Unity version |
 | Build modules | Only needed for player builds; see [BUILD.md](BUILD.md) |
 
@@ -31,7 +31,7 @@ The scene contains no authored gameplay objects. On entering Play Mode, `GameApp
 
 - the neon title stage and animated camera;
 - HUD, menus, modal dialogs and the Input System event system;
-- audio sources and the original 21-clip soundtrack;
+- audio sources and the original 32-clip soundtrack;
 - the save profile, progression, missions, shop state and leaderboard;
 - the run world, track, runner, obstacles, pickups, VFX and results when a mode starts.
 
@@ -56,12 +56,13 @@ This design removes prefab/scene-reference fragility and makes the build work fr
 | Lane left/right | `A`/`D` or arrows | Left stick | Swipe left/right |
 | Jump | `Space`, `W`, `↑` | South button | Swipe up |
 | Slide | `S`, `↓` | East button | Swipe down |
+| Premium ability | `Q` / `E` | Left/right shoulder | Ability HUD button |
 | Pause | `Esc`, `P` | Start | Pause button |
 
 - Hold jump for extra height; release early for a short hop.
 - Menus are mouse/touch driven and keyboard/gamepad navigable through Unity UI navigation.
-- **Settings** exposes music/SFX/ambience volume, swipe sensitivity, graphics preset, frame-rate cap (30/60/144), camera shake, reduced motion, vibration, high contrast and the multiplayer host/port.
-- The HUD shows distance, score, credits, speed/lives, timer/objective, active power-ups, connection state and the five-runner race ladder.
+- **Settings** exposes master/music/effects/ambience volume, swipe sensitivity, graphics preset, frame-rate cap, display options, camera shake, reduced motion, vibration, high contrast, the multiplayer host/port and the premium store URL.
+- The HUD shows score, distance, credits, speed/lives, a captioned run-time readout, objective progress, active power-ups, connection state and the five-runner race ladder.
 
 ## 5. Offline play
 
@@ -105,7 +106,25 @@ lsof -nP -iTCP:7777 -sTCP:LISTEN    # macOS/Linux
 python3 -m unittest discover -s Backend/tests -v   # integration tests
 ```
 
-## 7. Play online
+## 7. Run the premium GEM store locally
+
+The premium store is a separate HTTP + SQLite service used for real-money GEM packages, ownership and paid revives. It is not the race authority.
+
+```bash
+export NV_ADMIN_USERNAME=operator
+export NV_ADMIN_PASSWORD='choose-a-long-local-password'
+Backend/run_premium_local.sh
+```
+
+- It binds to `127.0.0.1:8088` and stores SQLite data and the device-key secret in gitignored `Backend/premium_data/`.
+- The game defaults to that endpoint. If needed, set it at **Settings → Network → Premium Store URL**; production must use **https://**.
+- GEMS are never minted locally or awarded by gameplay. Mobile purchases use the official Apple/Google store sheet through Unity IAP; desktop/web opens Stripe-hosted checkout. The backend verifies the receipt/webhook, prevents duplicate credit and then updates the wallet. If a provider is not configured, the shop says so and will not start a charge.
+- Receipts are emailed after a verified purchase when SMTP is configured. The receipt address defaults to the verified account email and can be changed from the account screen.
+- The legacy manual bank-transfer workflow is disabled by default. Only set `NV_ENABLE_MANUAL_BANK_TRANSFER=1` if an operator deliberately needs it for historical reconciliation; it is not the normal purchase path.
+- Review accounts, transactions, catalogue and refunds with `python3 Backend/premium_admin.py` (`transactions`, `accounts`, `account`, `catalog`, `set-package`, `set-product`, `refund`). See [PREMIUM_DEPLOYMENT.md](../Backend/PREMIUM_DEPLOYMENT.md) for provider configuration, HTTPS deployment, account/cloud-sync routes, receipts, refunds, security and backup requirements.
+- GEMS are never awarded by gameplay. If the store is unreachable the UI shows **STORE OFFLINE** and will not fabricate a balance, purchase or revive.
+
+## 8. Play online
 
 ### Local machine
 
@@ -130,9 +149,9 @@ All clients must use the same protocol version (`nv1`); the shipped client and s
 
 The client keeps the server-issued player ID and token for the session. If the socket drops, it retries automatically for up to three attempts and the server holds the runner's slot for 45 seconds. The runner is marked disconnected, their last validated distance is retained and the race continues. A finished room replays its stored `race_results` packet to a reconnecting client.
 
-Closing the game/process loses the token, so relaunching requires a new room join. There are no persistent accounts in this version.
+Closing the game/process loses the race token, so relaunching requires a new room join. The separate premium/account service now supports persistent email/password, phone and provider-linked identities plus cloud progression sync; the race authority itself still uses ephemeral session tokens.
 
-## 8. Troubleshooting
+## 9. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
@@ -145,9 +164,14 @@ Closing the game/process loses the token, so relaunching requires a new room joi
 | Online result says "NO REWARDS GRANTED" | Server connection ended or the result timed out before the verified packet arrived. Only verified results pay competitive rewards. |
 | Corrupt save on startup | The primary file is quarantined and `.bak` is restored automatically. |
 | No audio on WebGL | Browsers may block autoplay until the first click; interact with the menu. Unverified in this environment. |
+| GEM SHOP says "STORE OFFLINE" | Premium service not running, wrong URL, HTTP/HTTPS mismatch, or unreachable host. Start `Backend/run_premium_local.sh` or set the deployed URL in Settings. |
+| Paid purchase stays pending | The provider has not yet confirmed the payment, or server verification failed. Check transaction history and the operator `transactions` view; never credit manually without matching the provider record. |
+| Premium URL rejected | It must be an absolute `http://` or `https://` URL; production should use HTTPS. |
+| "STORE NOT CONFIGURED" on a package | The server has no credentials/store products for the current platform. Configure Stripe, Apple IAP or Google Play on the backend; the game will not fake a purchase. |
+| Cached GEMS reset after changing URL | Expected: cached wallet, token and entitlements from the previous server are cleared before syncing with the new authority. |
 
-## 9. Current environment status
+## 10. Current environment status
 
-The project was authored and verified on macOS 26.7.1 (Intel) with Unity **6000.6.7f1**, Python 3.9.6 and Unity's bundled .NET SDK. A Personal licence is active. Unity imports/compiles the project, **24/24 EditMode** and **9/9 PlayMode** tests pass (including navigation/Back, settings-from-pause, restart and purchase-confirmation checks), **710** static checks pass, and a universal **Intel + Apple silicon** macOS player built and launched successfully from `Builds/macOS/NeonVelocity.app`. **Nine** UI/gameplay screens, including an active biome transition and a subway/station frame, were captured at 1600×900, 1280×800 and 3840×2160; the host has no physical 4K display. The armour/audio/environment pass has no audible, live-display or frame-rate validation yet. See [DEVELOPMENT_PROGRESS.md](DEVELOPMENT_PROGRESS.md) for the current roadmap and evidence.
+The project was authored and verified on macOS 26.7.1 (Intel) with Unity **6000.6.7f1**, Python 3.9.6 and Unity's bundled .NET SDK. A Personal licence is active. Unity imports/compiles the project, **43/43 EditMode** and **18/18 PlayMode** tests pass (including navigation/Back, settings-from-pause, restart, purchase confirmation, Phase 03 shop tabs/transaction history, account/events/atlas/achievements, ability/cooldown, exact revive, endpoint cache reset, HUD/toast pause behaviour and a real 30 km streaming run), **66/66** headless core tests, **79/79** backend tests and **936** static checks pass, and a universal **Intel + Apple silicon** macOS player built from the Phase 03 source. A fresh **18-screen 1280×800** capture from that build includes the rebuilt GEM shop; the 1600×900 and 3840×2160 sets are from Phase 02, and the host has no physical 4K display. The premium/payment/account service is tested locally with stubbed Stripe/Apple/Google responses but is **not deployed**; live card/store sales need HTTPS, admin credentials, merchant/provider credentials, store products, SMTP delivery and a real sandbox transaction. The armour/audio/environment pass has no audible, live-display or frame-rate validation yet. See [PHASE03_FINAL_REPORT.md](PHASE03_FINAL_REPORT.md) and [DEVELOPMENT_PROGRESS.md](DEVELOPMENT_PROGRESS.md) for the current roadmaps and evidence.
 
 That launch is not a full manual playthrough. Every mode, power-up, result path, real-device input/audio and multi-machine online race still need the checklist in [TEST_REPORT.md](TEST_REPORT.md). Windows, Linux, WebGL, Android and iOS builds are unverified; Android/iOS modules and SDKs are absent. See [KNOWN_LIMITATIONS.md](KNOWN_LIMITATIONS.md) before making platform claims.

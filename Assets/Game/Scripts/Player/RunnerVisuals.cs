@@ -14,32 +14,54 @@ namespace NeonVelocity.Player
         Landing,
         Slide,
         Dead,
-        Victory
+        Victory,
+        Revive
     }
 
     /// <summary>
-    /// Original procedural runner rig. The silhouette is built from chamfered armour plates,
-    /// tapered composite shells, articulated hands/feet and emissive seams, then animated with
-    /// a speed-reactive procedural run cycle. It deliberately keeps the same public API as the
-    /// previous box rig so local play, remote runners and the garage preview stay compatible.
+    /// Original procedural runner rig — the NEON VELOCITY protagonist.
+    /// The silhouette is machined from chamfered armour plates over a graphite flight frame:
+    /// a layered chest carapace with a live reactor core, twin-shell pauldrons, articulated
+    /// gauntlets with fingers, actuator-ring legs with calf pistons and heel exhaust jets.
+    /// Materials follow the studio reference: glossy obsidian armour, titanium silver plating,
+    /// machined graphite internals, cyan energy light and magenta trim. Animation is a
+    /// speed-reactive procedural run/sprint cycle with banking, jump tucks, a double-jump
+    /// somersault, landing compression, a slide brace, a collapse death and a kneel-rise
+    /// revival. The public API is unchanged: Build, Tick, SetPose and the toggles still drive
+    /// local play, remote runners, the garage turntable and the title stage.
     /// </summary>
     public sealed class RunnerVisuals : MonoBehaviour
     {
         private sealed class Paint
         {
+            /// <summary>Glossy black mirage plating — the main armour surface.</summary>
             public Material Suit;
+            /// <summary>Woven carbon-fibre under-suit — studio matte, visible at the flex joints.</summary>
+            public Material Carbon;
+            /// <summary>Titanium silver plating for the outer shells.</summary>
             public Material Armor;
+            /// <summary>Graphite dark metal for sub-frame armour.</summary>
             public Material ArmorDark;
+            /// <summary>Deep intake housing metal.</summary>
+            public Material Deep;
+            /// <summary>Polished chrome details.</summary>
             public Material Chrome;
+            /// <summary>Dark rubberised joint seals.</summary>
             public Material Joint;
+            /// <summary>Cyan energy light.</summary>
             public Material Neon;
+            /// <summary>Magenta accent light.</summary>
             public Material Magenta;
+            /// <summary>Void-black composite soles and deck.</summary>
             public Material Dark;
+            /// <summary>Glowing visor glass used at the chest core.</summary>
             public Material Visor;
         }
 
         private const float LandingDuration = 0.22f;
+        private const float FlipDuration = 0.44f;
         private static Texture2D _contactShadowTexture;
+        private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
         private CharacterDefinition _definition;
         private Transform _visual;
@@ -66,56 +88,85 @@ namespace NeonVelocity.Player
         private float _phase;
         private float _bob;
         private float _lateralLean;
+        private float _sprintBlend;
         private float _landingTimer;
         private float _landingImpact;
+        private float _flipTimer;
         private bool _built;
         private bool _dead;
         private bool _victory;
+        private bool _remote;
         private float _deathSpin;
+        private float _reviveProgress;
         private Transform _shadow;
         private Material _shadowMaterial;
+        private Color _accent = Palette.Cyan;
+        private readonly List<Renderer> _pulseRenderers = new List<Renderer>(4);
+        private readonly List<Transform> _thrusterJets = new List<Transform>(2);
+        private Transform _speedWave;
+        // MaterialPropertyBlock cannot be constructed in a MonoBehaviour constructor (Unity
+        // forbids CreateImpl there), so the buffer is filled on first use inside Build.
+        private MaterialBlockBuffer _fx;
+
+        /// <summary>Lazy per-renderer emission buffer so live lights pulse without cloning materials.</summary>
+        private MaterialBlockBuffer Fx => _fx ??= new MaterialBlockBuffer();
+
+        /// <summary>Holds the single MaterialPropertyBlock used for emission pulses.</summary>
+        private sealed class MaterialBlockBuffer
+        {
+            public readonly MaterialPropertyBlock Block = new MaterialPropertyBlock();
+        }
 
         public CharacterDefinition Definition => _definition;
 
         public void Build(CharacterDefinition character, TrailDefinition trail, bool remote, string displayName)
         {
             _definition = character;
+            _remote = remote;
+            _accent = character.primary;
             Clear();
 
             _visual = new GameObject("Visual").transform;
             _visual.SetParent(transform, false);
 
-            Color suitDark = Color.Lerp(character.secondary, Palette.Void, 0.70f);
+            Color obsidian = Color.Lerp(Palette.Hex("#07080D"), character.secondary, 0.16f);
+            Color titanium = Color.Lerp(new Color(0.79f, 0.84f, 0.91f), character.secondary, 0.2f);
+            Color graphite = Color.Lerp(new Color(0.085f, 0.10f, 0.125f), character.primary, 0.1f);
+            Color carbon = Color.Lerp(new Color(0.062f, 0.072f, 0.088f), character.secondary, 0.12f);
             Color accent = character.primary;
-            Color pearl = Color.Lerp(character.secondary, Color.white, 0.62f);
             var paint = new Paint
             {
-                Suit = MaterialLibrary.LitTextured("runner_suit:" + character.id + ":" + character.armorStyle,
-                    TextureFactory.ArmorSurface(), suitDark, 0.22f, 0.62f, new Vector2(1.7f, 1.7f),
-                    TextureFactory.ArmorNormal(), new Vector2(1.7f, 1.7f), 0.42f),
-                Armor = MaterialLibrary.LitTextured("runner_armor:" + character.id + ":" + character.armorStyle,
-                    TextureFactory.ArmorSurface(), pearl, 0.62f, 0.84f, new Vector2(1.15f, 1.15f),
-                    TextureFactory.ArmorNormal(), new Vector2(1.15f, 1.15f), 0.58f),
-                ArmorDark = MaterialLibrary.LitTextured("runner_armor_dark:" + character.id + ":" + character.armorStyle,
-                    TextureFactory.ArmorSurface(), Color.Lerp(character.primary, Palette.Void, 0.45f),
-                    0.72f, 0.76f, new Vector2(1.35f, 1.35f), TextureFactory.ArmorNormal(),
-                    new Vector2(1.35f, 1.35f), 0.5f),
-                Chrome = MaterialLibrary.Lit(new Color(0.62f, 0.72f, 0.84f), 0.98f, 0.97f),
-                Joint = MaterialLibrary.Lit(new Color(0.025f, 0.038f, 0.06f), 0.72f, 0.7f),
-                Neon = MaterialLibrary.Lit(accent, 0.08f, 0.64f, accent, 4.1f),
-                Magenta = MaterialLibrary.Lit(Palette.Magenta, 0.1f, 0.58f, Palette.Magenta, 2.9f),
-                Dark = MaterialLibrary.Lit(Palette.Void, 0.32f, 0.55f),
-                Visor = MaterialLibrary.Lit(Color.Lerp(accent, Palette.Void, 0.7f), 0.94f, 0.99f,
-                    Color.Lerp(accent, Color.white, 0.16f), 1.15f)
+                Suit = MaterialLibrary.LitTextured("runner_obsidian:" + character.id,
+                    TextureFactory.ArmorSurface(), obsidian, 0.88f, 0.9f, new Vector2(2.1f, 2.1f),
+                    TextureFactory.ArmorNormal(), new Vector2(2.1f, 2.1f), 0.5f),
+                Carbon = MaterialLibrary.LitTextured("runner_carbon:" + character.id,
+                    TextureFactory.CarbonSurface(), carbon, 0.58f, 0.58f, new Vector2(3.4f, 3.4f),
+                    TextureFactory.CarbonNormal(), new Vector2(3.4f, 3.4f), 1.25f),
+                Armor = MaterialLibrary.LitTextured("runner_titanium:" + character.id,
+                    TextureFactory.ArmorSurface(), titanium, 0.98f, 0.86f, new Vector2(1.6f, 1.6f),
+                    TextureFactory.ArmorNormal(), new Vector2(1.6f, 1.6f), 0.42f),
+                ArmorDark = MaterialLibrary.LitTextured("runner_graphite:" + character.id,
+                    TextureFactory.ArmorSurface(), graphite, 0.84f, 0.74f, new Vector2(1.9f, 1.9f),
+                    TextureFactory.ArmorNormal(), new Vector2(1.9f, 1.9f), 0.55f),
+                Deep = MaterialLibrary.Lit(Color.Lerp(Palette.Void, character.primary, 0.05f), 0.66f, 0.62f),
+                Chrome = MaterialLibrary.Lit(new Color(0.72f, 0.78f, 0.86f), 1f, 0.95f),
+                Joint = MaterialLibrary.Lit(new Color(0.025f, 0.032f, 0.05f), 0.72f, 0.66f),
+                Neon = MaterialLibrary.Lit(accent, 0.08f, 0.7f, accent, 4.2f),
+                Magenta = MaterialLibrary.Lit(Palette.Magenta, 0.1f, 0.62f, Palette.Magenta, 3.1f),
+                Dark = MaterialLibrary.Lit(Palette.Void, 0.34f, 0.6f),
+                Visor = MaterialLibrary.Lit(accent, 0.94f, 0.99f,
+                    Color.Lerp(accent, Color.white, 0.22f), 1.4f)
             };
             DoubleSided(paint.Suit);
             DoubleSided(paint.Armor);
             DoubleSided(paint.ArmorDark);
+            DoubleSided(paint.Carbon);
             DoubleSided(paint.Joint);
             DoubleSided(paint.Dark);
 
             BuildBody(paint);
             AddStyleDetails(character.armorStyle, paint);
+            BuildMechanicalDetail(paint, remote);
             AddLights(accent, remote);
             AddTrails(trail, accent, remote);
             AddHoverboard(paint);
@@ -136,7 +187,7 @@ namespace NeonVelocity.Player
             // Pelvis: graphite flight frame under a sharp composite hip shell.
             _hips = Pivot("Hips", _visual, new Vector3(0f, 0.94f, 0f));
             PrimitiveMeshes.Beveled(_hips, "PelvisCage", new Vector3(0f, 0.035f, 0f),
-                new Vector3(0.35f, 0.23f, 0.29f), paint.Suit);
+                new Vector3(0.35f, 0.23f, 0.29f), paint.Carbon);
             PrimitiveMeshes.Beveled(_hips, "PelvisPlate", new Vector3(0f, 0.045f, 0.14f),
                 new Vector3(0.31f, 0.18f, 0.075f), paint.Armor);
             PrimitiveMeshes.Box(_hips, "Belt", new Vector3(0f, 0.17f, 0f), new Vector3(0.44f, 0.055f, 0.3f), paint.Chrome);
@@ -156,9 +207,9 @@ namespace NeonVelocity.Player
             PrimitiveMeshes.Box(_hips, "RearGlow", new Vector3(0f, 0.06f, -0.205f),
                 new Vector3(0.16f, 0.022f, 0.012f), paint.Neon);
 
-            // Chest: dark pressure shell, layered pearl carapace and a visible reactor core.
+            // Chest: dark pressure shell, layered titanium carapace and a visible reactor core.
             _torso = Pivot("Torso", _hips, new Vector3(0f, 0.12f, 0f));
-            PrimitiveMeshes.Create("Abdomen", PrimitiveMeshes.Capsule, paint.Suit, _torso,
+            PrimitiveMeshes.Create("Abdomen", PrimitiveMeshes.Capsule, paint.Carbon, _torso,
                 new Vector3(0f, 0.23f, 0f), new Vector3(0.34f, 0.26f, 0.28f));
             PrimitiveMeshes.Beveled(_torso, "AbdominalPlate", new Vector3(0f, 0.245f, 0.14f),
                 new Vector3(0.24f, 0.13f, 0.055f), paint.ArmorDark);
@@ -168,6 +219,9 @@ namespace NeonVelocity.Player
                 new Vector3(0f, 0.45f, 0f), new Vector3(0.47f, 0.34f, 0.33f));
             PrimitiveMeshes.Create("ChestPlate", PrimitiveMeshes.Capsule, paint.Armor, _torso,
                 new Vector3(0f, 0.47f, 0.045f), new Vector3(0.45f, 0.3f, 0.27f));
+            // Under-shell carbon barrier visible in the collar notch and under the pec plates.
+            PrimitiveMeshes.Beveled(_torso, "ChestCarbon", new Vector3(0f, 0.62f, 0.05f),
+                new Vector3(0.25f, 0.09f, 0.2f), paint.Carbon);
             PrimitiveMeshes.Beveled(_torso, "Sternum", new Vector3(0f, 0.46f, 0.205f),
                 new Vector3(0.14f, 0.27f, 0.06f), paint.ArmorDark);
             PrimitiveMeshes.Beveled(_torso, "PectoralL", new Vector3(-0.145f, 0.5f, 0.165f),
@@ -180,6 +234,7 @@ namespace NeonVelocity.Player
                 new Vector3(0f, 0.47f, 0.255f), new Vector3(0.155f, 0.012f, 0.155f), Quaternion.Euler(90f, 0f, 0f));
             PrimitiveMeshes.Create("Core", PrimitiveMeshes.Sphere, paint.Visor, _torso,
                 new Vector3(0f, 0.47f, 0.265f), new Vector3(0.088f, 0.088f, 0.045f));
+            RegisterPulse(_torso.Find("Core"), 3.4f);
             PrimitiveMeshes.Box(_torso, "MagentaChestMark", new Vector3(-0.19f, 0.37f, 0.235f),
                 new Vector3(0.06f, 0.014f, 0.012f), paint.Magenta, Quaternion.Euler(0f, 0f, 18f));
             PrimitiveMeshes.Box(_torso, "Collar", new Vector3(0f, 0.665f, 0f),
@@ -224,7 +279,7 @@ namespace NeonVelocity.Player
                     new Vector3(side * 0.12f, 0.148f, -0.285f), new Vector3(0.063f, 0.012f, 0.063f));
             }
 
-            // Helmet: pearl crown, angled jaw, deep visor and luminous side optics.
+            // Helmet: titanium crown, angled jaw, deep visor and luminous side optics.
             _head = Pivot("Head", _torso, new Vector3(0f, 0.71f, 0f));
             PrimitiveMeshes.Create("Neck", PrimitiveMeshes.Cylinder, paint.Joint, _head,
                 new Vector3(0f, -0.045f, 0f), new Vector3(0.11f, 0.085f, 0.11f));
@@ -232,6 +287,9 @@ namespace NeonVelocity.Player
                 new Vector3(0f, -0.005f, 0f), new Vector3(0.125f, 0.012f, 0.125f));
             PrimitiveMeshes.Create("HelmetShell", PrimitiveMeshes.Sphere, paint.Armor, _head,
                 new Vector3(0f, 0.15f, 0f), new Vector3(0.36f, 0.34f, 0.36f));
+            // Rear helmet weave: the carbon substrate that seals into the backpack spine.
+            PrimitiveMeshes.Beveled(_head, "HelmetWeave", new Vector3(0f, 0.15f, -0.115f),
+                new Vector3(0.27f, 0.24f, 0.09f), paint.Carbon);
             PrimitiveMeshes.Beveled(_head, "HelmetCrown", new Vector3(0f, 0.285f, -0.025f),
                 new Vector3(0.28f, 0.11f, 0.29f), paint.ArmorDark);
             PrimitiveMeshes.Beveled(_head, "HelmetRear", new Vector3(0f, 0.13f, -0.17f),
@@ -240,6 +298,7 @@ namespace NeonVelocity.Player
                 new Vector3(0.12f, 0.018f, 0.012f), paint.Neon);
             PrimitiveMeshes.Create("Visor", PrimitiveMeshes.Sphere, paint.Visor, _head,
                 new Vector3(0f, 0.165f, 0.135f), new Vector3(0.29f, 0.135f, 0.16f));
+            RegisterPulse(_head.Find("Visor"), 1.9f);
             PrimitiveMeshes.Box(_head, "VisorStrip", new Vector3(0f, 0.17f, 0.225f),
                 new Vector3(0.22f, 0.016f, 0.014f), paint.Neon);
             PrimitiveMeshes.Box(_head, "VisorPixelL", new Vector3(-0.16f, 0.17f, 0.215f),
@@ -299,7 +358,7 @@ namespace NeonVelocity.Player
                 new Vector3(0.16f, 0.018f, 0.012f), paint.Neon, Quaternion.Euler(0f, 0f, side * 10f));
             PrimitiveMeshes.Box(pivot, "PauldronRearMagenta", new Vector3(side * 0.02f, 0.12f, -0.155f),
                 new Vector3(0.07f, 0.012f, 0.01f), paint.Magenta, Quaternion.Euler(0f, 0f, side * 8f));
-            PrimitiveMeshes.Create("UpperArm", PrimitiveMeshes.Capsule, paint.Suit, pivot,
+            PrimitiveMeshes.Create("UpperArm", PrimitiveMeshes.Capsule, paint.Carbon, pivot,
                 new Vector3(0f, -0.19f, 0f), new Vector3(0.135f, 0.2f, 0.135f));
             PrimitiveMeshes.Beveled(pivot, "BicepPlate", new Vector3(0f, -0.16f, 0.065f),
                 new Vector3(0.115f, 0.16f, 0.055f), paint.Armor);
@@ -311,6 +370,9 @@ namespace NeonVelocity.Player
                 Vector3.zero, new Vector3(0.12f, 0.016f, 0.12f));
             PrimitiveMeshes.Create("Forearm", PrimitiveMeshes.Capsule, paint.Armor, forearm,
                 new Vector3(0f, -0.16f, 0f), new Vector3(0.145f, 0.17f, 0.145f));
+            // Woven carbon guard over the flex side of the forearm.
+            PrimitiveMeshes.Beveled(forearm, "ForeCarbon", new Vector3(side * 0.02f, -0.15f, -0.08f),
+                new Vector3(0.11f, 0.15f, 0.05f), paint.Carbon, Quaternion.Euler(0f, 0f, side * 6f));
             PrimitiveMeshes.Beveled(forearm, "Gauntlet", new Vector3(0f, -0.17f, 0.075f),
                 new Vector3(0.12f, 0.2f, 0.055f), paint.ArmorDark);
             PrimitiveMeshes.Box(forearm, "GauntletGlow", new Vector3(side * 0.072f, -0.18f, 0f),
@@ -342,7 +404,7 @@ namespace NeonVelocity.Player
         {
             var pivot = Pivot("Leg", parent, hip);
             PrimitiveMeshes.SphereObject(pivot, "HipJoint", Vector3.zero, 0.16f, paint.Joint);
-            PrimitiveMeshes.Create("Thigh", PrimitiveMeshes.Capsule, paint.Suit, pivot,
+            PrimitiveMeshes.Create("Thigh", PrimitiveMeshes.Capsule, paint.Carbon, pivot,
                 new Vector3(0f, -0.2f, 0f), new Vector3(0.18f, 0.24f, 0.18f));
             PrimitiveMeshes.Beveled(pivot, "ThighPlate", new Vector3(0f, -0.18f, 0.08f),
                 new Vector3(0.18f, 0.25f, 0.075f), paint.Armor);
@@ -361,6 +423,10 @@ namespace NeonVelocity.Player
                 new Vector3(0f, 0f, 0.082f), new Vector3(0.06f, 0.012f, 0.06f), Quaternion.Euler(90f, 0f, 0f));
             PrimitiveMeshes.Create("Shin", PrimitiveMeshes.Capsule, paint.Armor, shin,
                 new Vector3(0f, -0.18f, 0f), new Vector3(0.15f, 0.2f, 0.15f));
+            // Knee servo cluster: two chrome pins riding the transverse hinge.
+            for (int pin = -1; pin <= 1; pin += 2)
+                PrimitiveMeshes.SphereObject(shin, "KneeServo" + pin,
+                    new Vector3(pin * 0.06f, 0.045f, -0.03f), 0.05f, paint.Chrome);
             PrimitiveMeshes.Beveled(shin, "ShinGuard", new Vector3(0f, -0.16f, 0.075f),
                 new Vector3(0.12f, 0.24f, 0.06f), paint.ArmorDark);
             PrimitiveMeshes.Box(shin, "ShinGlow", new Vector3(0f, -0.17f, 0.112f),
@@ -392,7 +458,159 @@ namespace NeonVelocity.Player
                 new Vector3(0.17f, 0.012f, 0.3f), paint.Neon);
             PrimitiveMeshes.Box(foot, "HeelGlow", new Vector3(0f, -0.04f, -0.16f),
                 new Vector3(0.11f, 0.016f, 0.012f), paint.Magenta);
+            PrimitiveMeshes.Create("HeelJet", PrimitiveMeshes.Cylinder, paint.ArmorDark, foot,
+                new Vector3(0f, -0.02f, -0.175f), new Vector3(0.05f, 0.05f, 0.05f),
+                Quaternion.Euler(90f, 0f, 0f));
+            var jet = PrimitiveMeshes.Create("HeelJetGlow", PrimitiveMeshes.Cylinder, paint.Neon, foot,
+                new Vector3(0f, -0.02f, -0.208f), new Vector3(0.036f, 0.014f, 0.036f),
+                Quaternion.Euler(90f, 0f, 0f));
+            jet.GetComponent<Renderer>().shadowCastingMode = ShadowCastingMode.Off;
             return pivot;
+        }
+
+        /// <summary>
+        /// Second-pass mechanical detail: actuators, cable runs, vents, housings and micro
+        /// fasteners. Hardware clusters are skipped on remote ghosts to keep five-player races
+        /// cheap; everything else is a fixed-cost one-time build.
+        /// </summary>
+        private void BuildMechanicalDetail(Paint paint, bool remote)
+        {
+            var rng = remote ? new DeterministicRandom(0x51)
+                : new DeterministicRandom(0x5100 + AverageSeed(_definition != null ? _definition.id : ""));
+
+            // Knee actuators: twin chrome cylinders hinged around each knee joint.
+            foreach (var shin in new[] { _shinL, _shinR })
+            {
+                if (shin == null) continue;
+                PrimitiveMeshes.Create("KneeActuator", PrimitiveMeshes.Cylinder, paint.Chrome, shin,
+                    new Vector3(0.055f, 0.02f, 0.03f), new Vector3(0.028f, 0.11f, 0.028f),
+                    Quaternion.Euler(0f, 0f, 8f));
+                PrimitiveMeshes.Create("KneeActuatorInner", PrimitiveMeshes.Cylinder, paint.ArmorDark, shin,
+                    new Vector3(0.075f, -0.045f, 0.03f), new Vector3(0.018f, 0.09f, 0.018f),
+                    Quaternion.Euler(0f, 0f, 8f));
+                PrimitiveMeshes.Box(shin, "CalfHousing", new Vector3(0f, -0.28f, -0.075f),
+                    new Vector3(0.075f, 0.14f, 0.05f), paint.Deep);
+                PrimitiveMeshes.Box(shin, "CalfHousingVent", new Vector3(0f, -0.28f, -0.108f),
+                    new Vector3(0.045f, 0.09f, 0.012f), paint.Neon);
+            }
+
+            // Elbow pistons behind each upper arm.
+            foreach (var arm in new[] { _armL, _armR })
+            {
+                if (arm == null) continue;
+                PrimitiveMeshes.Create("BicepPiston", PrimitiveMeshes.Cylinder, paint.Chrome, arm,
+                    new Vector3(0f, -0.14f, -0.1f), new Vector3(0.02f, 0.14f, 0.02f),
+                    Quaternion.Euler(6f, 0f, 0f));
+                PrimitiveMeshes.Beveled(arm, "ShoulderMount", new Vector3(0f, 0.005f, -0.05f),
+                    new Vector3(0.13f, 0.09f, 0.1f), paint.ArmorDark);
+            }
+
+            // Chest intake shrouds and micro vents.
+            PrimitiveMeshes.Beveled(_torso, "IntakeL", new Vector3(0.21f, 0.42f, 0.16f),
+                new Vector3(0.055f, 0.17f, 0.09f), paint.Deep, Quaternion.Euler(0f, 0f, 10f));
+            PrimitiveMeshes.Beveled(_torso, "IntakeR", new Vector3(-0.21f, 0.42f, 0.16f),
+                new Vector3(0.055f, 0.17f, 0.09f), paint.Deep, Quaternion.Euler(0f, 0f, -10f));
+            PrimitiveMeshes.Box(_torso, "IntakeGlowL", new Vector3(0.235f, 0.38f, 0.148f),
+                new Vector3(0.016f, 0.07f, 0.014f), paint.Neon);
+            PrimitiveMeshes.Box(_torso, "IntakeGlowR", new Vector3(-0.235f, 0.38f, 0.148f),
+                new Vector3(0.016f, 0.07f, 0.014f), paint.Neon);
+            for (int i = 0; i < 3; i++)
+            {
+                float y = 0.3f - i * 0.052f;
+                PrimitiveMeshes.Box(_torso, "VentSlot" + i, new Vector3(0f, y, -0.222f),
+                    new Vector3(0.21f - i * 0.045f, 0.014f, 0.014f), paint.Joint);
+            }
+
+            // Cable harness: hip to backpack on both sides plus a neck chute.
+            AddCable(_hips, new Vector3(0.14f, 0.16f, -0.13f), 3, paint);
+            AddCable(_hips, new Vector3(-0.14f, 0.16f, -0.13f), 3, paint);
+            AddCable(_head, new Vector3(0.1f, -0.02f, -0.12f), 2, paint);
+            AddCable(_head, new Vector3(-0.1f, -0.02f, -0.12f), 2, paint);
+
+            if (remote) return;
+
+            // Twin backpack exhaust bells with additive exhaust glow plates.
+            for (int side = -1; side <= 1; side += 2)
+            {
+                var bell = PrimitiveMeshes.Create("ExhaustBell" + side, PrimitiveMeshes.Cylinder, paint.ArmorDark,
+                    _torso, new Vector3(side * 0.12f, 0.235f, -0.325f), new Vector3(0.075f, 0.07f, 0.075f));
+                PrimitiveMeshes.Create("ExhaustLip" + side, PrimitiveMeshes.Cylinder, paint.Chrome, bell.transform,
+                    new Vector3(0f, 0.035f, 0f), new Vector3(0.085f, 0.014f, 0.085f));
+                var flare = PrimitiveMeshes.Create("ExhaustFlare" + side, PrimitiveMeshes.Quad,
+                    MaterialLibrary.Additive(_accent), _torso,
+                    new Vector3(side * 0.12f, 0.16f, -0.33f), new Vector3(0.13f, 0.3f, 1f),
+                    Quaternion.Euler(90f, 0f, 0f));
+                var flareRenderer = flare.GetComponent<Renderer>();
+                flareRenderer.shadowCastingMode = ShadowCastingMode.Off;
+                flareRenderer.receiveShadows = false;
+                _thrusterJets.Add(flare.transform);
+            }
+
+            // Fastener studs across chest plate, pauldrons and hip guards.
+            var boltMaterial = paint.Chrome;
+            for (int i = 0; i < 9; i++)
+            {
+                Transform host;
+                Vector3 anchor;
+                switch (i % 3)
+                {
+                    case 0:
+                        host = _torso;
+                        anchor = new Vector3(rng.Range(-0.16f, 0.16f), rng.Range(0.36f, 0.56f), 0.24f);
+                        break;
+                    case 1:
+                        host = i % 2 == 0 ? _armL : _armR;
+                        anchor = new Vector3(rng.Range(0f, 0.14f), rng.Range(0.03f, 0.11f), 0.16f);
+                        break;
+                    default:
+                        host = _hips;
+                        anchor = new Vector3(rng.Range(-0.22f, 0.22f), 0.14f, 0.13f);
+                        break;
+                }
+                if (host == null) continue;
+                PrimitiveMeshes.SphereObject(host, "Fastener" + i, anchor, 0.022f, boltMaterial);
+            }
+
+            // Sprint energy wake behind the boots.
+            if (_speedWave != null) return;
+            var waveGo = new GameObject("SprintWake");
+            waveGo.transform.SetParent(_visual, false);
+            waveGo.transform.localPosition = new Vector3(0f, 0.06f, -0.5f);
+            var filter = waveGo.AddComponent<MeshFilter>();
+            filter.sharedMesh = PrimitiveMeshes.Quad;
+            var wakeRenderer = waveGo.AddComponent<MeshRenderer>();
+            wakeRenderer.sharedMaterial = MaterialLibrary.Additive(
+                Color.Lerp(_accent, Palette.Magenta, 0.35f));
+            wakeRenderer.shadowCastingMode = ShadowCastingMode.Off;
+            wakeRenderer.receiveShadows = false;
+            waveGo.transform.localRotation = Quaternion.Euler(0f, 90f, 0f);
+            waveGo.SetActive(false);
+            _speedWave = waveGo.transform;
+        }
+
+        private static void AddCable(Transform parent, Vector3 anchor, int segments, Paint paint)
+        {
+            if (parent == null) return;
+            var previous = anchor;
+            float sway = anchor.x > 0f ? 1f : -1f;
+            for (int i = 0; i < segments; i++)
+            {
+                Vector3 next = anchor + new Vector3(sway * (0.02f + i * 0.012f), -0.075f - i * 0.02f,
+                    -0.05f - i * 0.035f);
+                Vector3 mid = (previous + next) * 0.5f;
+                Vector3 delta = next - previous;
+                PrimitiveMeshes.Box(parent, "Cable" + (i < segments ? i : 0) + (sway > 0 ? "R" : "L") + i,
+                    mid, new Vector3(0.018f, delta.magnitude, 0.018f), paint.Joint,
+                    Quaternion.LookRotation(delta.normalized, Vector3.up) * Quaternion.Euler(90f, 0f, 0f));
+                previous = next;
+            }
+        }
+
+        private static int AverageSeed(string id)
+        {
+            int seed = 0;
+            for (int i = 0; i < id.Length; i++) seed += id[i] * (i + 1);
+            return seed & 0xFFFF;
         }
 
         private void AddStyleDetails(int style, Paint paint)
@@ -417,6 +635,10 @@ namespace NeonVelocity.Player
                     new Vector3(0.045f, 0.28f, 0.3f), paint.Neon, Quaternion.Euler(0f, 0f, -24f));
                 PrimitiveMeshes.Box(_torso, "VoltFinR", new Vector3(0.41f, 0.54f, -0.1f),
                     new Vector3(0.045f, 0.28f, 0.3f), paint.Neon, Quaternion.Euler(0f, 0f, 24f));
+                PrimitiveMeshes.Box(_torso, "VoltSpikeL", new Vector3(-0.3f, 0.69f, -0.06f),
+                    new Vector3(0.05f, 0.12f, 0.05f), paint.ArmorDark, Quaternion.Euler(0f, 0f, -18f));
+                PrimitiveMeshes.Box(_torso, "VoltSpikeR", new Vector3(0.3f, 0.69f, -0.06f),
+                    new Vector3(0.05f, 0.12f, 0.05f), paint.ArmorDark, Quaternion.Euler(0f, 0f, 18f));
                 PrimitiveMeshes.Box(_head, "VisorStripe", new Vector3(0f, 0.17f, 0.225f),
                     new Vector3(0.31f, 0.022f, 0.018f), paint.Magenta);
             }
@@ -456,6 +678,157 @@ namespace NeonVelocity.Player
                         new Vector3(-0.18f + i * 0.18f, 0.02f, -0.18f),
                         new Vector3(0.045f, 0.2f, 0.045f), paint.Neon, Quaternion.Euler(0f, 0f, 12f));
                 }
+            }
+            else if (style == 5)
+            {
+                // PHANTOM X: black-budget phase frame. Mirrored slash canards, a split tail
+                // radiator pair and hip phase splitters read as a distinct stealth silhouette.
+                PrimitiveMeshes.Beveled(_head, "PhaseCanardL", new Vector3(-0.19f, 0.3f, 0.1f),
+                    new Vector3(0.05f, 0.05f, 0.24f), paint.ArmorDark, Quaternion.Euler(0f, 0f, -20f));
+                PrimitiveMeshes.Beveled(_head, "PhaseCanardR", new Vector3(0.19f, 0.3f, 0.1f),
+                    new Vector3(0.05f, 0.05f, 0.24f), paint.ArmorDark, Quaternion.Euler(0f, 0f, 20f));
+                PrimitiveMeshes.Box(_head, "CanardEdgeL", new Vector3(-0.23f, 0.265f, 0.2f),
+                    new Vector3(0.016f, 0.024f, 0.14f), paint.Neon, Quaternion.Euler(0f, 0f, -20f));
+                PrimitiveMeshes.Box(_head, "CanardEdgeR", new Vector3(0.23f, 0.265f, 0.2f),
+                    new Vector3(0.016f, 0.024f, 0.14f), paint.Neon, Quaternion.Euler(0f, 0f, 20f));
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    // Twin tail radiators that split behind the backpack.
+                    PrimitiveMeshes.Box(_torso, "PhaseRadiator" + side,
+                        new Vector3(side * 0.26f, 0.56f, -0.34f),
+                        new Vector3(0.06f, 0.42f, 0.16f), paint.ArmorDark,
+                        Quaternion.Euler(0f, 0f, side * 14f));
+                    PrimitiveMeshes.Box(_torso, "PhaseRadiatorGlow" + side,
+                        new Vector3(side * 0.27f, 0.47f, -0.42f),
+                        new Vector3(0.04f, 0.3f, 0.014f), paint.Neon, Quaternion.Euler(0f, 0f, side * 14f));
+                    // Hip spline fins trace the phase wake.
+                    PrimitiveMeshes.Box(_hips, "PhaseSpline" + side,
+                        new Vector3(side * 0.3f, 0.02f, -0.2f),
+                        new Vector3(0.05f, 0.3f, 0.2f), paint.Armor, Quaternion.Euler(0f, 0f, side * 10f));
+                    PrimitiveMeshes.Box(_hips, "PhaseSplineGlow" + side,
+                        new Vector3(side * 0.3f, -0.08f, -0.3f),
+                        new Vector3(0.03f, 0.12f, 0.03f), paint.Neon);
+                    // Mirrored shoulder lip: low-observable edge with a cyan underline.
+                    PrimitiveMeshes.Box(_torso, "StealthLip" + side,
+                        new Vector3(side * 0.315f, 0.6f, -0.05f),
+                        new Vector3(0.05f, 0.035f, 0.3f), paint.ArmorDark);
+                    PrimitiveMeshes.Box(_torso, "StealthLipGlow" + side,
+                        new Vector3(side * 0.315f, 0.575f, 0.05f),
+                        new Vector3(0.045f, 0.014f, 0.2f), paint.Neon);
+                }
+                // Split chest chevron: the coolant band across the sternum.
+                PrimitiveMeshes.Box(_torso, "CoolantBandL", new Vector3(-0.075f, 0.4f, 0.245f),
+                    new Vector3(0.13f, 0.022f, 0.012f), paint.Neon, Quaternion.Euler(0f, 0f, -16f));
+                PrimitiveMeshes.Box(_torso, "CoolantBandR", new Vector3(0.075f, 0.4f, 0.245f),
+                    new Vector3(0.13f, 0.022f, 0.012f), paint.Neon, Quaternion.Euler(0f, 0f, 16f));
+            }
+            else if (style == 6)
+            {
+                // NOVA TITAN: siege-class frame. Blast-loaded pauldrons, a reactor plate
+                // keel and reinforced leg bracing read as an armoured heavy courier.
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    PrimitiveMeshes.Beveled(_torso, "SiegePauldron" + side,
+                        new Vector3(side * 0.4f, 0.6f, 0f),
+                        new Vector3(0.16f, 0.22f, 0.36f), paint.Armor, Quaternion.Euler(0f, 0f, side * -12f));
+                    PrimitiveMeshes.Box(_torso, "SiegeVent" + side,
+                        new Vector3(side * 0.4f, 0.55f, -0.19f),
+                        new Vector3(0.1f, 0.05f, 0.02f), paint.Neon);
+                    PrimitiveMeshes.Box(_torso, "BlastPlate" + side,
+                        new Vector3(side * 0.26f, 0.44f, 0.22f),
+                        new Vector3(0.14f, 0.2f, 0.05f), paint.ArmorDark, Quaternion.Euler(0f, 0f, side * 7f));
+                    PrimitiveMeshes.Box(_hips, "LegBrace" + side,
+                        new Vector3(side * 0.26f, -0.04f, 0.02f),
+                        new Vector3(0.06f, 0.26f, 0.1f), paint.Armor);
+                    PrimitiveMeshes.Box(_hips, "LegBraceGlow" + side,
+                        new Vector3(side * 0.28f, -0.14f, 0.04f),
+                        new Vector3(0.03f, 0.1f, 0.014f), paint.Neon);
+                    PrimitiveMeshes.Beveled(_torso, "HipReinforce" + side,
+                        new Vector3(side * 0.33f, 0.1f, -0.05f),
+                        new Vector3(0.1f, 0.14f, 0.18f), paint.ArmorDark);
+                }
+                // Chest keel: the big reactor plate with stacked heat walls.
+                PrimitiveMeshes.Beveled(_torso, "ReactorKeel", new Vector3(0f, 0.42f, 0.24f),
+                    new Vector3(0.36f, 0.3f, 0.06f), paint.Armor);
+                for (int wall = 0; wall < 3; wall++)
+                    PrimitiveMeshes.Box(_torso, "KeelWall" + wall,
+                        new Vector3(0f, 0.335f + wall * 0.085f, 0.272f),
+                        new Vector3(0.3f - wall * 0.055f, 0.022f, 0.016f), paint.Neon);
+                PrimitiveMeshes.Box(_torso, "KeelCore", new Vector3(0f, 0.44f, 0.285f),
+                    new Vector3(0.075f, 0.075f, 0.02f), paint.Magenta);
+                // Heavy holster: a cargo turbine on the right hip and a winch drum on the left.
+                PrimitiveMeshes.Create("HelmDrum", PrimitiveMeshes.Cylinder, paint.ArmorDark, _hips,
+                    new Vector3(-0.3f, 0.06f, -0.14f), new Vector3(0.16f, 0.24f, 0.16f),
+                    Quaternion.Euler(0f, 0f, 84f));
+                PrimitiveMeshes.Create("CargoTurbine", PrimitiveMeshes.Cylinder, paint.Chrome, _hips,
+                    new Vector3(0.31f, 0.03f, -0.1f), new Vector3(0.14f, 0.2f, 0.14f),
+                    Quaternion.Euler(0f, 0f, -84f));
+                PrimitiveMeshes.Create("TurbineGlow", PrimitiveMeshes.Cylinder, paint.Neon, _hips,
+                    new Vector3(0.31f, -0.08f, -0.1f), new Vector3(0.1f, 0.02f, 0.1f),
+                    Quaternion.Euler(0f, 0f, -84f));
+                // Shoulder ram horns used to brace hazards.
+                for (int side = -1; side <= 1; side += 2)
+                    PrimitiveMeshes.Box(_head, "RamHorn" + side,
+                        new Vector3(side * 0.17f, 0.36f, 0.02f),
+                        new Vector3(0.045f, 0.12f, 0.045f), paint.Armor,
+                        Quaternion.Euler(0f, 0f, side * 18f));
+            }
+            else if (style == 7)
+            {
+                // ECHO: survey frame with a shoulder sonar dish and receiver rings.
+                PrimitiveMeshes.Beveled(_torso, "SonarBack", new Vector3(0f, 0.42f, -0.4f),
+                    new Vector3(0.42f, 0.34f, 0.1f), paint.ArmorDark);
+                PrimitiveMeshes.Create("Dish", PrimitiveMeshes.Cylinder, paint.Neon, _torso,
+                    new Vector3(-0.44f, 0.68f, -0.18f), new Vector3(0.13f, 0.05f, 0.13f),
+                    Quaternion.Euler(24f, 0f, -34f));
+                PrimitiveMeshes.Create("DishCore", PrimitiveMeshes.Cylinder, paint.Magenta, _torso,
+                    new Vector3(-0.47f, 0.73f, -0.15f), new Vector3(0.045f, 0.07f, 0.045f),
+                    Quaternion.Euler(24f, 0f, -34f));
+                for (int i = 0; i < 3; i++)
+                    PrimitiveMeshes.Box(_head, "ReceiverRing" + i, new Vector3(0f, 0.16f + i * 0.075f, 0.2f),
+                        new Vector3(0.3f - i * 0.06f, 0.014f, 0.014f), paint.Neon);
+                PrimitiveMeshes.Box(_torso, "Waveform", new Vector3(0f, 0.27f, 0.255f),
+                    new Vector3(0.21f, 0.018f, 0.01f), paint.Neon);
+            }
+            else if (style == 8)
+            {
+                // SABLE: mirrored night frame with a deep cowl and blade shoulders.
+                PrimitiveMeshes.Beveled(_head, "Cowl", new Vector3(0f, 0.3f, -0.08f),
+                    new Vector3(0.46f, 0.2f, 0.34f), paint.ArmorDark);
+                PrimitiveMeshes.Box(_head, "CowlEdge", new Vector3(0f, 0.23f, 0.16f),
+                    new Vector3(0.42f, 0.025f, 0.03f), paint.Neon);
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    PrimitiveMeshes.Box(_torso, "MirrorShard" + side, new Vector3(side * 0.45f, 0.62f, -0.12f),
+                        new Vector3(0.06f, 0.34f, 0.16f), paint.Neon, Quaternion.Euler(0f, 0f, side * 28f));
+                    PrimitiveMeshes.Box(_hips, "VeilPanel" + side, new Vector3(side * 0.24f, 0.02f, -0.2f),
+                        new Vector3(0.12f, 0.46f, 0.03f), paint.ArmorDark, Quaternion.Euler(0f, 0f, side * 6f));
+                }
+                PrimitiveMeshes.Beveled(_torso, "VoidCore", new Vector3(0f, 0.5f, 0.235f),
+                    new Vector3(0.11f, 0.11f, 0.02f), paint.Magenta, Quaternion.Euler(0f, 0f, 45f));
+            }
+            else if (style == 9)
+            {
+                // HELIOS: solar bulwark with photovoltaic shoulder wings.
+                PrimitiveMeshes.Beveled(_torso, "SolarPlate", new Vector3(0f, 0.5f, 0.24f),
+                    new Vector3(0.3f, 0.3f, 0.03f), paint.ArmorDark);
+                PrimitiveMeshes.Box(_torso, "SolarCellA", new Vector3(0f, 0.58f, 0.265f),
+                    new Vector3(0.24f, 0.1f, 0.012f), paint.Neon);
+                PrimitiveMeshes.Box(_torso, "SolarCellB", new Vector3(0f, 0.44f, 0.265f),
+                    new Vector3(0.24f, 0.1f, 0.012f), paint.Neon);
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    PrimitiveMeshes.Box(_torso, "SolarWing" + side, new Vector3(side * 0.53f, 0.66f, -0.04f),
+                        new Vector3(0.3f, 0.05f, 0.34f), paint.Neon, Quaternion.Euler(0f, 0f, side * -22f));
+                    PrimitiveMeshes.Box(_torso, "SolarWingFrame" + side, new Vector3(side * 0.53f, 0.66f, -0.04f),
+                        new Vector3(0.32f, 0.02f, 0.36f), paint.ArmorDark, Quaternion.Euler(0f, 0f, side * -22f));
+                }
+                PrimitiveMeshes.Create("SunDisc", PrimitiveMeshes.Cylinder, paint.Neon, _head,
+                    new Vector3(0f, 0.4f, -0.06f), new Vector3(0.21f, 0.02f, 0.21f),
+                    Quaternion.Euler(90f, 0f, 0f));
+                PrimitiveMeshes.Create("SunCore", PrimitiveMeshes.Cylinder, paint.Magenta, _head,
+                    new Vector3(0f, 0.4f, -0.06f), new Vector3(0.1f, 0.03f, 0.1f),
+                    Quaternion.Euler(90f, 0f, 0f));
             }
         }
 
@@ -627,6 +1000,19 @@ namespace NeonVelocity.Player
                 material.SetFloat("_Cull", (float)CullMode.Off);
         }
 
+        private void RegisterPulse(Transform target, float baseIntensity)
+        {
+            if (target == null) return;
+            var renderer = target.GetComponent<Renderer>();
+            if (renderer == null) return;
+            var entry = renderer;
+            entry.GetPropertyBlock(Fx.Block);
+            _pulseRenderers.Add(entry);
+        }
+
+        /// <summary>Called when the runner consumes an air-jump charge mid-flight.</summary>
+        public void NotifyDoubleJump() => _flipTimer = FlipDuration;
+
         public void Tick(float dt, float speedNormalised, float lateralVelocity, RunnerPose pose,
             float verticalVelocity = 0f, float groundHeight = 0f)
         {
@@ -634,26 +1020,32 @@ namespace NeonVelocity.Player
             if (_pose != pose) _pose = pose;
             if (_pose == RunnerPose.Dead) _dead = true;
             if (_pose == RunnerPose.Victory) _victory = true;
+            if (_pose == RunnerPose.Revive && _reviveProgress <= 0.01f) _reviveProgress = 0.01f;
             _landingTimer = Mathf.Max(0f, _landingTimer - dt);
+            _flipTimer = Mathf.Max(0f, _flipTimer - dt);
 
             float speed = Mathf.Clamp01(speedNormalised);
+            bool sprinting = speed > 0.62f;
+            _sprintBlend = Mathf.Lerp(_sprintBlend, sprinting ? 1f : 0f, dt * (sprinting ? 3.6f : 5.2f));
+            float sprint = _sprintBlend;
             _lateralLean = Mathf.Lerp(_lateralLean, Mathf.Clamp(-lateralVelocity * 0.06f, -13f, 13f), dt * 9f);
-            float runSpeed = 5.4f + speed * 7.2f;
+            float runSpeed = 5.4f + speed * 7.4f + sprint * 1.2f;
             _phase += dt * runSpeed * Mathf.PI;
             float s = Mathf.Sin(_phase);
+            float stride = 58f + sprint * 9f;
 
-            float runLean = 6.5f + speed * 9.5f;
+            float runLean = 6.5f + speed * 9.5f + sprint * 5.0f;
             float torsoYaw = s * 4.5f;
             float hipsYaw = -s * 3.6f;
-            float hipY = 0.94f + Mathf.Abs(s) * 0.028f;
-            float legLX = s * 58f;
-            float legRX = -s * 58f;
-            float kneeLX = Mathf.Max(0f, -s) * 62f;
-            float kneeRX = Mathf.Max(0f, s) * 62f;
-            float armLX = -s * 56f;
-            float armRX = s * 56f;
-            float foreLX = -20f - Mathf.Max(0f, s) * 28f;
-            float foreRX = -20f - Mathf.Max(0f, -s) * 28f;
+            float hipY = 0.94f + Mathf.Abs(s) * (0.028f + sprint * 0.008f);
+            float legLX = s * stride;
+            float legRX = -s * stride;
+            float kneeLX = Mathf.Max(0f, -s) * (62f + sprint * 8f);
+            float kneeRX = Mathf.Max(0f, s) * (62f + sprint * 8f);
+            float armLX = -s * (56f + sprint * 10f);
+            float armRX = s * (56f + sprint * 10f);
+            float foreLX = -20f - Mathf.Max(0f, s) * (28f + sprint * 10f);
+            float foreRX = -20f - Mathf.Max(0f, -s) * (28f + sprint * 10f);
             float torsoRoll = _lateralLean;
             float headYaw = -torsoYaw * 0.55f;
             float headPitch = -runLean * 0.28f;
@@ -692,26 +1084,28 @@ namespace NeonVelocity.Player
                 }
                 else
                 {
+                    // Descending: football-carry sweep, torso into the wind, ready to brace.
                     legLX = 22f; legRX = 30f;
                     kneeLX = 34f; kneeRX = 50f;
-                    armLX = -38f; armRX = -28f;
-                    foreLX = -18f; foreRX = -16f;
-                    torsoRot = Quaternion.Euler(9f, 0f, _lateralLean);
+                    armLX = -52f; armRX = -36f;
+                    foreLX = -24f; foreRX = -20f;
+                    torsoRot = Quaternion.Euler(15f, 0f, _lateralLean);
+                    hipsRot = Quaternion.Euler(-2f, 0f, 0f);
                 }
                 headRot = Quaternion.Euler(-5f, 0f, 0f);
                 hipsRot = Quaternion.Euler(-4f, 0f, 0f);
             }
             else if (_pose == RunnerPose.Slide)
             {
-                visualPos = new Vector3(0f, -0.35f, 0f);
+                visualPos = new Vector3(0f, -0.35f, 0.02f);
                 hipY = 0.55f;
                 torsoRot = Quaternion.Euler(64f, 0f, _lateralLean * 1.25f);
                 headRot = Quaternion.Euler(-48f, 0f, -_lateralLean * 0.4f);
                 hipsRot = Quaternion.Euler(-8f, 0f, 0f);
                 legLX = 74f; legRX = -12f;
                 kneeLX = -22f; kneeRX = 76f;
-                armLX = 48f; armRX = 20f;
-                foreLX = -14f; foreRX = -8f;
+                armLX = 48f; armRX = 8f;
+                foreLX = -34f; foreRX = -52f;
                 visualRot = Quaternion.Euler(0f, 0f, -_lateralLean * 0.16f);
             }
             else if (_pose == RunnerPose.Dead)
@@ -739,6 +1133,42 @@ namespace NeonVelocity.Player
                 headRot = Quaternion.Euler(-8f, 0f, 0f);
                 hipsRot = Quaternion.identity;
             }
+            else if (_pose == RunnerPose.Revive)
+            {
+                _reviveProgress = Mathf.Min(1.2f, _reviveProgress + dt * 1.05f);
+                float rise = Mathf.Clamp01(_reviveProgress);
+                float kneel = Mathf.Clamp01(_reviveProgress * 2f);
+                hipY = 0.94f - 0.34f * (1f - rise);
+                legLX = legRX = -34f * Mathf.Lerp(1f, 0f, Mathf.Clamp01((rise - 0.85f) / 0.35f));
+                kneeLX = kneeRX = Mathf.Lerp(96f, 5f, Mathf.Clamp01((rise - 0.7f) / 0.3f));
+                armLX = armRX = -14f + kneel * 6f;
+                foreLX = foreRX = -36f + rise * 26f;
+                torsoRot = Quaternion.Euler(30f * (1f - rise), Mathf.Sin(Time.unscaledTime * 1.1f) * 2.4f, 0f);
+                headRot = Quaternion.Euler(10f * (1f - rise) - 2f, 0f, 0f);
+                hipsRot = Quaternion.Euler(-6f * (1f - rise), 0f, 0f);
+                visualRot = Quaternion.identity;
+            }
+
+            // Double-jump somersault: a full forward roll layered over the jump tuck.
+            if (_flipTimer > 0f && _pose == RunnerPose.Jump)
+            {
+                float flip = Mathf.Clamp01(1f - _flipTimer / FlipDuration);
+                float roll = Mathf.SmoothStep(0f, 1f, flip);
+                float tuck = Mathf.Clamp01((flip - 0.06f) / 0.2f);
+                float untuck = Mathf.Clamp01((flip - 0.68f) / 0.26f);
+                float tuckAmount = tuck * (1f - untuck);
+                visualRot = Quaternion.Euler(-360f * roll, 0f, -_lateralLean * 0.18f);
+                legLX = Mathf.Lerp(legLX, 96f, tuckAmount);
+                legRX = Mathf.Lerp(legRX, 88f, tuckAmount);
+                kneeLX = Mathf.Lerp(kneeLX, 118f, tuckAmount);
+                kneeRX = Mathf.Lerp(kneeRX, 112f, tuckAmount);
+                armLX = Mathf.Lerp(armLX, -64f, tuckAmount);
+                armRX = Mathf.Lerp(armRX, -64f, tuckAmount);
+                foreLX = Mathf.Lerp(foreLX, -84f, tuckAmount);
+                foreRX = Mathf.Lerp(foreRX, -84f, tuckAmount);
+                torsoRot = Quaternion.Euler(24f, 0f, _lateralLean * 0.5f);
+                headRot = Quaternion.Euler(-14f, 0f, 0f);
+            }
 
             // Landing compression is layered over the run cycle, never replacing a jump or slide.
             if (_landingTimer > 0f && (_pose == RunnerPose.Run || _pose == RunnerPose.Idle))
@@ -757,7 +1187,7 @@ namespace NeonVelocity.Player
             }
 
             visualPos.y += visualY;
-            float k = 1f - Mathf.Exp(-dt * 15f);
+            float k = 1f - Mathf.Exp(-dt * (sprint > 0.5f ? 17f : 15f));
             _visual.localPosition = Vector3.Lerp(_visual.localPosition, visualPos, k);
             _visual.localRotation = Quaternion.Slerp(_visual.localRotation, visualRot, k);
             _hips.localPosition = Vector3.Lerp(_hips.localPosition, new Vector3(0f, hipY, 0f), k);
@@ -788,6 +1218,7 @@ namespace NeonVelocity.Player
 
             UpdateTrails(speed);
             UpdateShadow(groundHeight);
+            UpdateEnergy(dt, speed);
 
             if (_aura != null && _aura.activeSelf)
                 _aura.transform.Rotate(Vector3.up, dt * 120f, Space.Self);
@@ -801,15 +1232,51 @@ namespace NeonVelocity.Player
             }
         }
 
+        private void UpdateEnergy(float dt, float speed)
+        {
+            float time = Time.unscaledTime;
+            float flicker = _dead ? Mathf.Max(0f, 1f - _deathSpin * 1.6f) : 1f;
+            float pulse = 0.62f + Mathf.Sin(time * (5.4f + speed * 9.5f)) * 0.24f
+                         + Mathf.Sin(time * 13.7f) * 0.08f;
+            float intensity = (2.9f + speed * 2.8f + pulse) * flicker;
+            var emission = new Color(_accent.r * intensity, _accent.g * intensity,
+                _accent.b * intensity, 1f);
+            Fx.Block.SetColor(EmissionColorId, emission);
+            for (int i = 0; i < _pulseRenderers.Count; i++)
+            {
+                if (_pulseRenderers[i] == null) continue;
+                _pulseRenderers[i].SetPropertyBlock(Fx.Block);
+            }
+
+            float jet = Mathf.Clamp01(speed * 1.35f + (_flipTimer > 0f ? 0.7f : 0f)) * flicker;
+            for (int i = 0; i < _thrusterJets.Count; i++)
+            {
+                var flame = _thrusterJets[i];
+                if (flame == null) continue;
+                float wave = 0.55f + Mathf.Sin(time * 21f + i * 2.4f) * 0.45f;
+                flame.localScale = new Vector3(0.13f, (0.12f + wave * 0.3f) * (1f + jet), 1f);
+            }
+
+            if (_speedWave != null)
+            {
+                bool sprintWake = (_pose == RunnerPose.Run || _pose == RunnerPose.Slide ||
+                                   _pose == RunnerPose.Landing) && speed > 0.5f && !_dead;
+                float wakeScale = sprintWake ? speed * (0.62f + Mathf.Sin(time * 18f) * 0.1f) : 0f;
+                _speedWave.localScale = new Vector3(wakeScale * 1.6f, Mathf.Max(0.001f, wakeScale), 1f);
+                _speedWave.gameObject.SetActive(wakeScale > 0.01f);
+            }
+        }
+
         private void UpdateTrails(float speed)
         {
-            bool active = _pose != RunnerPose.Idle && _pose != RunnerPose.Dead && speed > 0.04f;
+            bool active = _pose != RunnerPose.Idle && _pose != RunnerPose.Dead &&
+                          _pose != RunnerPose.Revive && speed > 0.04f;
             for (int i = 0; i < _trails.Count; i++)
             {
                 var trail = _trails[i];
                 if (trail == null) continue;
                 trail.emitting = active;
-                trail.widthMultiplier = active ? 0.72f + speed * 0.72f : 0.2f;
+                trail.widthMultiplier = active ? (0.72f + speed * 0.8f) : 0.2f;
             }
         }
 
@@ -842,6 +1309,7 @@ namespace NeonVelocity.Player
             _dead = pose == RunnerPose.Dead;
             _victory = pose == RunnerPose.Victory;
             if (pose == RunnerPose.Dead) _deathSpin = 0f;
+            if (pose == RunnerPose.Revive) _reviveProgress = 0.01f;
             if (pose == RunnerPose.Jump || pose == RunnerPose.Slide) _landingTimer = 0f;
         }
 
@@ -881,6 +1349,9 @@ namespace NeonVelocity.Player
             _aura = null;
             _trail = null;
             _trails.Clear();
+            _pulseRenderers.Clear();
+            _thrusterJets.Clear();
+            _speedWave = null;
             _nameTag = null;
             _shadow = null;
             _built = false;

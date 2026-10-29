@@ -35,9 +35,11 @@ This applies and saves:
 - Linear colour space
 - Android: min SDK 26, ARM64 only, IL2CPP, internet permission forced
 - Build scene list: only `Assets/Game/Scenes/Main.unity`, enabled
-- Runtime URP shader templates under `Assets/Game/Resources/Materials/`, so URP/Lit and URP/Unlit are not stripped
-- Always-included post-processing shaders (Bloom, Gaussian/Bokeh DoF, motion blur, Panini)
+- Runtime URP shader templates under `Assets/Game/Resources/Materials/`, so URP/Lit and URP/Unlit variants remain available to runtime-created materials
+- Always-included post-processing shaders (Bloom, Gaussian/Bokeh DoF, motion blur, Panini, UberPost)
 - URP unused-post-processing-resource stripping disabled so runtime-created volume profiles work
+- URP unused-variant stripping disabled in `UniversalRenderPipelineGlobalSettings.asset`; every world material is created at runtime, so its variants must not be removed
+- PC renderer uses Forward+ with native render pass and no renderer features (the broken SSAO feature was removed)
 
 The same settings are already persisted in `ProjectSettings/ProjectSettings.asset` and `ProjectSettings/EditorBuildSettings.asset`, but running the menu item is recommended after changing Unity versions.
 
@@ -91,10 +93,10 @@ CI hosts need a Unity licence (licensed runner or floating licence) and the matc
 ### macOS
 
 - Produces an `.app` bundle. The project does not configure notarisation, hardened runtime, entitlements or signing identity.
-- **BuildMacOS** sets `OSXStandalone.UserBuildSettings.architecture` to **x86_64 + ARM64**, producing a universal app. The verified build was 117.0 MiB and launched on an Intel Mac.
+- **BuildMacOS** sets `OSXStandalone.UserBuildSettings.architecture` to **x86_64 + ARM64**, producing a universal app. The final verified build was **122.5 MiB**, built in **27.3 s** (**39.0 s wall** including Unity startup), and launched on an Intel Mac.
 - The tested app is ad-hoc signed only. For distribution, sign with a Developer ID and notarise separately.
 - Online needs outbound TCP access to port 7777 (or the configured port).
-- Optional visual capture: launch the executable with `-nv-capture /absolute/output/directory -nv-capture-size 1600x900` (use `3840x2160` for a 4K pass). The player saves `menu.png`, `settings.png`, `shop-garage.png`, `modes.png`, `gameplay-01.png`, `gameplay-02.png` and `pause.png`, then exits. This developer flag does not affect normal launch.
+- Optional visual capture: launch the executable with `-nv-capture /absolute/output/directory -nv-capture-size 1600x900` (use `3840x2160` for a 4K pass). The player saves 18 screens — `menu.png`, `settings.png`, `settings-network.png`, `shop-garage.png`, `modes.png`, `account-signin.png`, `account-recovery.png`, `account-profile.png`, `events.png`, `discovery.png`, `achievements.png`, `characters.png`, `gem-shop-packages.png`, `gameplay-01.png`, `gameplay-02.png`, `gameplay-transition.png`, `gameplay-tunnel.png` and `pause.png` — then exits. This developer flag does not affect normal launch. The harness re-asserts the requested resolution before each readback.
 
 ### Windows / Linux
 
@@ -124,7 +126,9 @@ CI hosts need a Unity licence (licensed runner or floating licence) and the matc
 - If connecting to a LAN server, iOS local-network privacy requirements may require adding a local network usage description in the generated Xcode project. This has not been verified.
 - Online requires TCP reachability; no TLS or App Transport Security changes are configured.
 
-## 6. Server configuration for builds
+## 6. Server and premium endpoints for builds
+
+### Multiplayer authority
 
 The client defaults to `127.0.0.1:7777`, which is only useful on the same machine. For devices and remote players:
 
@@ -134,19 +138,32 @@ The client defaults to `127.0.0.1:7777`, which is only useful on the same machin
 
 The server has no authentication beyond ephemeral session tokens and no TLS. Use a trusted LAN or a VPN. For public internet deployment, place it behind infrastructure you control and add transport security before exposing it broadly; the stock Unity client cannot speak TLS, so that requires a client/protocol change.
 
+### Premium GEM service
+
+- The game defaults the premium endpoint to `http://127.0.0.1:8088` for local testing. Set the production **https://** endpoint in **Settings → Network → Premium Store URL**.
+- Changing the endpoint clears that profile's cached GEM balance, transaction history, token and entitlements before the next sync. Server state remains authoritative; an unreachable service shows **STORE OFFLINE** and cannot sell or revive.
+- The service is separate from the race authority. Deploy `Backend/premium_server.py` behind an HTTPS reverse proxy with admin credentials, backups and monitoring. Full procedure: [PREMIUM_DEPLOYMENT.md](../Backend/PREMIUM_DEPLOYMENT.md).
+- Five GEM tiers are served and can be overridden with `NV_GEM_PACKAGE_<ID>_{GEMS,BONUS_GEMS,PRICE_LKR,NAME,DESCRIPTION,ENABLED}`. Stripe-hosted checkout needs a server secret, price IDs, webhook secret and HTTPS return pages. The Unity client never receives secret keys or price IDs.
+- **Unity IAP 4.15.1 is integrated** (`com.unity.purchasing`) for Apple In-App Purchase on iOS and Google Play Billing on Android. The client forwards the store receipt/token to the backend, which verifies it before crediting GEMS. Store products must use the backend package ids (`gems_80`, `gems_200`, ...) unless matching alias maps are configured on both server and client.
+- **No store product or merchant account is configured.** The shop reads `/api/v1/store/payments` and will not start a platform purchase when the matching provider capability is absent. Apple/Google billing cannot be called live until the store products, credentials and device builds exist.
+- The retired manual bank-transfer flow is **off by default**. Only `NV_ENABLE_MANUAL_BANK_TRANSFER=1` re-enables the legacy routes, and it is not shown in the Phase 03 shop.
+- Account/cloud-sync endpoints run in the same service. Email verification/reset/receipt delivery needs SMTP credentials; phone OTP needs an SMS gateway. Server-side Google ID-token and Apple identity-token verification exist, but the Unity build has no native Google/Apple sign-in plugin.
+- Normal purchases never accept card details in Unity. Card checkout is hosted by Stripe; Apple/Google use their official store sheets. Card numbers, CVV and provider secrets must never be placed in the project or a build.
+
 ## 7. Pre-release verification checklist
 
 A target is only "verified" after all of the following on real hardware:
 
 - [x] Unity editor imports the project with zero compile errors.
-- [x] EditMode tests pass (core + save + display/settings): **24 / 24**.
-- [x] PlayMode tests pass (boot, practice, jump, navigation/Back, settings-from-pause, results, restart, garage cleanup and purchase confirmation): **9 / 9**.
-- [ ] Offline modes start, pause, crash, finish and persist progression after restart.
+- [x] EditMode tests pass (core + save + display/settings + master volume + progression/locations/junctions + transaction labels): **43 / 43**.
+- [x] PlayMode tests pass (boot, practice, jump, navigation/Back, settings-from-pause, results, restart, garage cleanup, purchase confirmation, Phase 03 shop tabs/offline history, account/events/atlas/achievements, ability/cooldown, exact revive, endpoint cache reset, menu-label visibility, independent HUD tickers and pause HUD visibility): **18 / 18**.
+- [ ] Offline modes start, pause, crash, finish and persist progression after restart on every target.
 - [ ] The backend starts, and 2–5 humans can match, ready, count down, race and receive results.
 - [ ] A player can disconnect and reconnect within 45 s without losing their slot.
 - [x] macOS build succeeds and launches outside the editor (**universal, launched on Intel**).
 - [ ] Audio is audible and input works with the target's keyboard/gamepad/touch.
 - [ ] Online connectivity is tested from the target network (WebGL expected to fail by design).
+- [ ] The deployed premium endpoint is set and STORE OFFLINE, catalogue, one sandbox purchase per provider, duplicate replay, receipt, refund, ownership, transaction-history and revive paths are tested against it.
 - [ ] Signing/store packaging (Android/iOS/macOS) is completed separately.
 
 The macOS universal build has been produced and launched. Windows/Linux/WebGL/Android/iOS builds have not; see [TEST_REPORT.md](TEST_REPORT.md).

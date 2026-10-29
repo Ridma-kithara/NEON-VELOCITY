@@ -19,6 +19,16 @@ namespace NeonVelocity.Player
         public bool Timed;
     }
 
+    public struct RunnerReviveState
+    {
+        public float Distance;
+        public int Lane;
+        public float Height;
+        public float VerticalVelocity;
+        public bool Sliding;
+        public float Speed;
+    }
+
     /// <summary>
     /// Deterministic three-lane runner. Movement, jumping, sliding, collisions, pickups and
     /// power-ups are resolved against explicit swept bounds rather than Unity physics, which
@@ -36,6 +46,10 @@ namespace NeonVelocity.Player
         public int Lane { get; private set; } = 1;
         public float PlayerZ { get; private set; }
         public float LaneX { get; private set; }
+        /// <summary>Lateral route displacement applied by curved junctions.</summary>
+        public float RouteOffsetX { get; private set; }
+        /// <summary>Full rendered X including the current junction curve.</summary>
+        public float RouteX => _x + _routeOffset;
         public int Coins { get; private set; }
         public int Lives { get; private set; }
         public int Jumps { get; private set; }
@@ -51,6 +65,21 @@ namespace NeonVelocity.Player
         public int HoverboardCharges => _hoverboardCharges;
         public float PreferredTimeScale => _slowMotionTimer > 0f && !GameModes.IsOnline(Mode.Id) ? 0.64f : 1f;
         public float SpeedNormalised => Mathf.Clamp01((Speed - Config.baseSpeed) / Mathf.Max(1f, Config.maxSpeed - Config.baseSpeed));
+        public string AbilityId { get; private set; } = "";
+        public string AbilityName { get; private set; } = "";
+        public bool HasAbility => !string.IsNullOrEmpty(AbilityId);
+        public bool AbilityActive { get; private set; }
+        public float AbilityCooldownRemaining { get; private set; }
+        public float AbilityCooldownDuration { get; private set; } = 1f;
+        public float AbilityReadyFraction => HasAbility
+            ? Mathf.Clamp01(1f - AbilityCooldownRemaining / Mathf.Max(0.01f, AbilityCooldownDuration))
+            : 0f;
+        public JunctionPhase CurrentJunctionPhase { get; private set; }
+        public JunctionKind CurrentJunctionKind { get; private set; }
+        public JunctionBranch JunctionCommitment { get; private set; }
+        public float JunctionLean { get; private set; }
+        public int JunctionsTaken { get; private set; }
+        public string JunctionLabel => _junctionState.Plan != null ? _junctionState.Plan.DisplayName : "";
 
         public int Score
         {
@@ -79,6 +108,7 @@ namespace NeonVelocity.Player
         public event Action Died;
         public event Action WorldRebased;
         public event Action<float> Landed;
+        public event Action<string> AbilityActivated;
 
         private GameApp App;
         private InputRouter _input;
@@ -87,6 +117,8 @@ namespace NeonVelocity.Player
         private float _x;
         private float _xStart;
         private float _xTarget;
+        private float _routeOffset;
+        private int _lastLaneDirection = 1;
         private float _laneTimer;
         private float _y;
         private float _vy;
@@ -117,11 +149,19 @@ namespace NeonVelocity.Player
         private int _shieldLevel;
         private int _boostLevel;
         private int _headStart;
+        private CharacterDefinition _character;
+        private float _speedBias = 1f;
+        private float _abilityActiveTimer;
+        private float _abilityDuration;
+        private int _abilityLevel;
         private readonly List<Obstacle> _obstacles = new List<Obstacle>(48);
         private readonly List<EnergyPickup> _credits = new List<EnergyPickup>(64);
         private readonly List<PowerUpPickup> _powerUps = new List<PowerUpPickup>(6);
         private readonly HashSet<int> _nearMissSeen = new HashSet<int>();
         private readonly Dictionary<PowerUpType, float> _effectTimers = new Dictionary<PowerUpType, float>();
+        private JunctionState _junctionState;
+        private float _junctionLean;
+        private int _junctionPlanSegment = -1;
         private readonly List<PowerUpStatus> _activeEffects = new List<PowerUpStatus>(5);
 
         public IReadOnlyList<PowerUpStatus> ActiveEffects
@@ -155,6 +195,9 @@ namespace NeonVelocity.Player
             _x = 0f;
             _xStart = 0f;
             _xTarget = 0f;
+            _routeOffset = 0f;
+            RouteOffsetX = 0f;
+            _lastLaneDirection = 1;
             Distance = Mathf.Max(0, _headStart);
             _prevZ = 8f + Distance;
             PlayerZ = _prevZ;
@@ -162,9 +205,29 @@ namespace NeonVelocity.Player
             IsDead = false;
             _stepTimer = 0.16f;
             _stepIndex = 0;
+            ResetJunctionState();
+            JunctionsTaken = 0;
 
             var character = config.Character(app.Progression.Profile.selectedCharacter);
             var trail = config.Trail(app.Progression.Profile.selectedTrail);
+            _character = character;
+            _speedBias = character != null ? Mathf.Clamp(character.speedBias, 0.9f, 1.1f) : 1f;
+            if (character != null && !string.IsNullOrEmpty(character.abilityId))
+            {
+                AbilityId = character.abilityId;
+                AbilityName = string.IsNullOrEmpty(character.abilityName)
+                    ? character.abilityId.Replace('_', ' ').ToUpperInvariant()
+                    : character.abilityName;
+                string upgradeId = AbilityId == "nova_burst" ? "nova_effect" : "phase_effect";
+                _abilityLevel = Mathf.Clamp(app.Progression.Profile.PremiumUpgradeLevel(upgradeId), 0, 3);
+                _abilityDuration = Mathf.Max(0.6f, character.abilityDuration +
+                    (AbilityId == "nova_burst" ? _abilityLevel * 0.35f : _abilityLevel * 0.2f));
+                AbilityCooldownDuration = Mathf.Max(8f, character.abilityCooldown - _abilityLevel * 1.6f);
+                AbilityCooldownRemaining = 0f;
+                // NOVA TITAN's defensive trade-off: one shield charge exists from the first
+                // metre, but the frame is slower and its ability cooldown is the longest.
+                if (character.defenseBias > 0.5f) _shieldCharges = Mathf.Max(_shieldCharges, 1);
+            }
             var visualGo = new GameObject("Runner Visual");
             visualGo.transform.SetParent(transform, false);
             Visuals = visualGo.AddComponent<RunnerVisuals>();
@@ -190,6 +253,7 @@ namespace NeonVelocity.Player
             _input.JumpRequested += RequestJump;
             _input.JumpReleased += ReleaseJump;
             _input.SlideRequested += RequestSlide;
+            _input.AbilityRequested += ActivateAbility;
         }
 
         public void StopInput()
@@ -199,6 +263,68 @@ namespace NeonVelocity.Player
             _input.JumpRequested -= RequestJump;
             _input.JumpReleased -= ReleaseJump;
             _input.SlideRequested -= RequestSlide;
+            _input.AbilityRequested -= ActivateAbility;
+        }
+
+        /// <summary>
+        /// Fires the premium frame's signature ability. The two abilities are balanced
+        /// sidegrades: PHANTOM X spends its cooldown on a short untouchable dash, while NOVA
+        /// TITAN clears the hazards around it and refreshes a single shield charge. Neither
+        /// grants score, credits or XP.
+        /// </summary>
+        public void ActivateAbility()
+        {
+            if (!Running || IsDead || !HasAbility || AbilityCooldownRemaining > 0.001f) return;
+            AbilityActive = true;
+            _abilityActiveTimer = _abilityDuration;
+            AbilityCooldownRemaining = AbilityCooldownDuration;
+            switch (AbilityId)
+            {
+                case "phase_dash":
+                    _invincibleTimer = Mathf.Max(_invincibleTimer, _abilityDuration);
+                    _speedModel.SetBoost(1.22f);
+                    _vfx?.Burst(new Vector3(RouteX, _y + 0.95f, PlayerZ), Palette.Cyan, 30, 0.45f);
+                    break;
+                case "nova_burst":
+                    Track?.ClearHazardsAround(PlayerZ, 13f);
+                    _shieldCharges = Mathf.Max(_shieldCharges, 1);
+                    _invincibleTimer = Mathf.Max(_invincibleTimer, 0.6f);
+                    _vfx?.Burst(new Vector3(RouteX, _y + 0.9f, PlayerZ), Palette.Amber, 42, 0.7f);
+                    break;
+                case "echo_pulse":
+                    _magnetTimer = Mathf.Max(_magnetTimer, 5f);
+                    _vfx?.Burst(new Vector3(RouteX, _y + 0.9f, PlayerZ), Palette.Cyan, 34, 0.6f);
+                    _vfx?.Burst(new Vector3(RouteX, _y + 0.9f, PlayerZ + 6f), Palette.Lime, 24, 0.8f);
+                    break;
+                case "night_veil":
+                    _invincibleTimer = Mathf.Max(_invincibleTimer, _abilityDuration);
+                    _vfx?.Burst(new Vector3(RouteX, _y + 0.95f, PlayerZ), Palette.Violet, 28, 0.5f);
+                    break;
+                case "solar_aegis":
+                    _shieldCharges = Mathf.Max(_shieldCharges, 1);
+                    _invincibleTimer = Mathf.Max(_invincibleTimer, 1.5f);
+                    _vfx?.Burst(new Vector3(RouteX, _y + 0.95f, PlayerZ), Palette.Amber, 38, 0.65f);
+                    break;
+            }
+            App?.Audio.PlaySfx("sfx_ability", 0.9f);
+            AbilityActivated?.Invoke(AbilityName);
+        }
+
+        private void TickAbility(float dt)
+        {
+            if (AbilityCooldownRemaining > 0f)
+                AbilityCooldownRemaining = Mathf.Max(0f, AbilityCooldownRemaining - dt);
+            if (_abilityActiveTimer > 0f)
+            {
+                _abilityActiveTimer = Mathf.Max(0f, _abilityActiveTimer - dt);
+                if (_abilityActiveTimer <= 0f && AbilityActive)
+                {
+                    AbilityActive = false;
+                    if (AbilityId == "phase_dash")
+                        _speedModel.SetBoost(_phaseTimer > 0f ? 1.3f
+                            : (_boostTimer > 0f ? 1.2f + _boostLevel * 0.025f : 1f));
+                }
+            }
         }
 
         public void StartRunning()
@@ -206,6 +332,25 @@ namespace NeonVelocity.Player
             Running = true;
             IsDead = false;
             Visuals?.SetPose(RunnerPose.Run);
+        }
+
+        /// <summary>
+        /// Grants an extra starting distance for revival runs. Call after Begin and before
+        /// StartRunning; the track regenerates ahead and the runner gets a shield window.
+        /// </summary>
+        public void GrantHeadStart(float distance)
+        {
+            float bonus = Mathf.Max(0f, distance - Distance);
+            if (bonus <= 0f || Track == null) return;
+            Distance += bonus;
+            _prevZ = 8f + Distance;
+            PlayerZ = _prevZ;
+            transform.position = new Vector3(LaneX, 0f, PlayerZ);
+            Track.Tick(Distance);
+            Track.ClearHazardsAround(PlayerZ, 16f);
+            // 3.6 s covers the launch countdown itself plus the first moment of movement,
+            // so a revived runner never gets clipped by an uncleared hazard at the seam.
+            _invincibleTimer = 3.6f;
         }
 
         public void Finish(bool victory)
@@ -224,12 +369,63 @@ namespace NeonVelocity.Player
             Died?.Invoke();
         }
 
+        /// <summary>
+        /// Captures the exact kinematic state at the moment of death. The revive service
+        /// debits GEMS server-side, then this snapshot is restored without rebuilding the
+        /// world, rerolling the track or resetting collected score.
+        /// </summary>
+        public RunnerReviveState CaptureReviveState() => new RunnerReviveState
+        {
+            Distance = Distance,
+            Lane = Lane,
+            Height = _y,
+            VerticalVelocity = _vy,
+            Sliding = _slideTimer > 0f,
+            Speed = Speed
+        };
+
+        /// <summary>
+        /// Restores a captured crash state at the same metre, lane and vertical pose. A short
+        /// server-upgraded stabilisation window prevents the killing hazard from immediately
+        /// re-triggering while the runner accelerates clear of it.
+        /// </summary>
+        public void ReviveAt(RunnerReviveState state, float invulnerabilitySeconds)
+        {
+            if (Track == null) return;
+            Distance = Mathf.Max(0f, state.Distance);
+            Lane = LaneMath.ClampLane(state.Lane);
+            _x = LaneMath.LaneToX(Lane);
+            _xStart = _x;
+            _xTarget = _x;
+            LaneX = _x;
+            _laneTimer = 0f;
+            _y = Mathf.Max(0f, state.Height);
+            _vy = state.VerticalVelocity;
+            _grounded = _y <= 0.01f;
+            _slideTimer = state.Sliding && _grounded ? Mathf.Max(0.3f, Config.slideDuration * 0.7f) : 0f;
+            _jumpBufferTimer = 0f;
+            _coyoteTimer = _grounded ? 0.11f : 0f;
+            _lives = Mathf.Max(1, _lives);
+            Speed = Mathf.Max(Speed, Mathf.Max(Config.baseSpeed * 0.8f, state.Speed * 0.92f));
+            _prevZ = 8f + Distance - _worldShifted;
+            PlayerZ = _prevZ;
+            Track.Tick(Distance);
+            _nearMissSeen.Clear();
+            _invincibleTimer = Mathf.Max(_invincibleTimer, Mathf.Max(1.5f, invulnerabilitySeconds));
+            IsDead = false;
+            Running = true;
+            transform.position = new Vector3(RouteX, _y, PlayerZ);
+            if (Visuals != null) Visuals.SetPose(RunnerPose.Run);
+            _vfx?.Burst(new Vector3(RouteX, _y + 0.9f, PlayerZ), Palette.Cyan, 26, 0.5f);
+        }
+
         public void Tick(float dt)
         {
             if (dt <= 0f) return;
             UpdateTimers(dt);
             if (Running)
             {
+                TickAbility(dt);
                 Elapsed += dt;
                 Advance(dt);
             }
@@ -241,7 +437,11 @@ namespace NeonVelocity.Player
             // Vertical and lateral motion are resolved before hazards are swept. A jump press
             // therefore raises the hitbox in the same frame it is registered, which matters at
             // top speed where the runner can cover more than half a metre per rendered frame.
+            // Resolve the junction before lateral movement so a branch commitment clamps the
+            // same frame's lane request. Both motion systems stay frame-rate independent.
+            UpdateJunction(dt);
             UpdateLane(dt);
+            UpdateRouteOffset(dt);
             UpdateVertical(dt);
             if (Running)
             {
@@ -250,7 +450,7 @@ namespace NeonVelocity.Player
             }
 
             UpdateFootsteps(dt);
-            transform.position = new Vector3(_x, _y, PlayerZ);
+            transform.position = new Vector3(RouteX, _y, PlayerZ);
             if (Visuals != null)
             {
                 float lateralVelocity = _laneTimer > 0f ? (_xTarget - _xStart) / Mathf.Max(0.001f, Config.laneSwitchDuration) : 0f;
@@ -277,15 +477,15 @@ namespace NeonVelocity.Player
             float cadence = Mathf.Lerp(0.3f, 0.155f, SpeedNormalised);
             _stepTimer += Mathf.Max(0.07f, cadence);
             _stepIndex++;
-            bool metal = Track != null && Mathf.Abs(Track.CurrentBiome) % 4 == 3;
+            bool metal = Track != null && Track.CurrentStyle == 3;
             App.Audio.PlayFootstep(metal, Mathf.Lerp(0.28f, 0.42f, SpeedNormalised), _stepIndex);
             if (_stepIndex % 2 == 0 && Speed > Config.baseSpeed * 1.25f)
-                _vfx?.Dust(new Vector3(_x, 0.03f, PlayerZ - 0.1f), metal ? Palette.Cyan : Palette.White, 2);
+                _vfx?.Dust(new Vector3(RouteX, 0.03f, PlayerZ - 0.1f), metal ? Palette.Cyan : Palette.White, 2);
         }
 
         private void Advance(float dt)
         {
-            float target = _speedModel.SpeedAt(Distance, Elapsed) * Mode.SpeedMultiplier;
+            float target = _speedModel.SpeedAt(Distance, Elapsed) * Mode.SpeedMultiplier * _speedBias;
             Speed = Mathf.Lerp(Speed, target, 1f - Mathf.Exp(-dt * 2.8f));
             if (Speed <= 0.01f) Speed = Mathf.Max(4f, Config.baseSpeed * Mode.SpeedMultiplier);
             float advance = Speed * dt;
@@ -315,6 +515,87 @@ namespace NeonVelocity.Player
             WorldRebased?.Invoke();
         }
 
+        private void ResetJunctionState()
+        {
+            _junctionState = default;
+            _junctionPlanSegment = -1;
+            CurrentJunctionPhase = JunctionPhase.None;
+            JunctionCommitment = JunctionBranch.None;
+            _junctionLean = 0f;
+        }
+
+        /// <summary>
+        /// Reads the deterministic junction plan, commits the runner to the lane it occupies at
+        /// the stop line and holds that branch until the merge. Signature cues fire exactly once
+        /// per phase, and a new junction always clears the previous commitment.
+        /// </summary>
+        private void UpdateJunction(float dt)
+        {
+            JunctionPhase previousPhase = CurrentJunctionPhase;
+            if (Track == null || !Track.GetJunctionState(Distance, out var state))
+            {
+                if (previousPhase != JunctionPhase.None) ResetJunctionState();
+                _junctionLean = Mathf.MoveTowards(_junctionLean, 0f, dt * 5f);
+                JunctionLean = _junctionLean;
+                return;
+            }
+
+            if (_junctionPlanSegment != state.Plan.SegmentIndex)
+            {
+                _junctionPlanSegment = state.Plan.SegmentIndex;
+                JunctionCommitment = JunctionBranch.None;
+            }
+
+            _junctionState = state;
+            CurrentJunctionPhase = state.Phase;
+            CurrentJunctionKind = state.Plan.Kind;
+
+            if (state.Phase == JunctionPhase.Warning)
+                JunctionCommitment = JunctionBranch.None;
+
+            if (state.Phase == JunctionPhase.Commit && JunctionCommitment == JunctionBranch.None)
+            {
+                var branch = JunctionRules.CommitForLane(Lane, _lastLaneDirection, state.Plan);
+                if (branch != JunctionBranch.None)
+                {
+                    JunctionCommitment = branch;
+                    JunctionsTaken++;
+                    App.Audio.PlaySfx("sfx_lane", 0.38f, 0.05f);
+                    // The centre lane is blocked by a median at a side-choice junction. Steer
+                    // the runner into the chosen branch during the commit approach instead of
+                    // leaving an unavoidable collision at the divider.
+                    int branchLane = JunctionRules.LaneForBranch(branch);
+                    if (Lane != branchLane && state.Plan.RequiresSideChoice)
+                        MoveToLane(branchLane, false);
+                }
+            }
+            if (state.Phase == JunctionPhase.Branch && state.Plan.IsNarrowBridge)
+                JunctionCommitment = JunctionBranch.Centre;
+
+            if (state.Phase == JunctionPhase.None || state.Phase == JunctionPhase.Merge)
+                JunctionCommitment = state.Phase == JunctionPhase.Merge ? JunctionCommitment : JunctionBranch.None;
+
+            if (state.Phase != previousPhase)
+            {
+                if (state.Phase == JunctionPhase.Warning)
+                    App.Audio.PlaySfx("sfx_location", 0.55f, 0.15f);
+                else if (state.Phase == JunctionPhase.Branch && JunctionCommitment != JunctionBranch.None)
+                    App.Audio.PlaySfx("sfx_ability", 0.26f, 0.1f);
+            }
+
+            float targetLean = 0f;
+            if (state.Phase == JunctionPhase.Commit || state.Phase == JunctionPhase.Branch)
+            {
+                if (JunctionCommitment == JunctionBranch.Left) targetLean = -1f;
+                else if (JunctionCommitment == JunctionBranch.Right) targetLean = 1f;
+                else if (state.Plan.IsNarrowBridge) targetLean = 0f;
+                else if (state.Plan.HasCurvedRoute)
+                    targetLean = Mathf.Clamp(_routeOffset * 0.7f, -1f, 1f);
+            }
+            _junctionLean = Mathf.MoveTowards(_junctionLean, targetLean, dt * 4f);
+            JunctionLean = _junctionLean;
+        }
+
         private void UpdateLane(float dt)
         {
             if (_laneTimer <= 0f) return;
@@ -327,6 +608,19 @@ namespace NeonVelocity.Player
                 _x = _xTarget;
                 LaneX = _x;
             }
+        }
+
+        /// <summary>
+        /// Follows the track's deterministic lateral route. The same pure curve function is
+        /// used to build the asphalt and collision surfaces, so the runner cannot drift off
+        /// the visible deck on a curved road, T-junction or shortcut.
+        /// </summary>
+        private void UpdateRouteOffset(float dt)
+        {
+            float target = Track != null ? Track.GetJunctionRouteOffset(Distance, Lane) : 0f;
+            float rate = 6f + Speed * 0.5f;
+            _routeOffset = Mathf.MoveTowards(_routeOffset, target, rate * dt);
+            RouteOffsetX = _routeOffset;
         }
 
         private void UpdateVertical(float dt)
@@ -358,7 +652,7 @@ namespace NeonVelocity.Player
                     App.Audio.PlaySfx("sfx_land", Mathf.Lerp(0.45f, 0.72f, weight), 0.03f);
                     Visuals?.NotifyLanding(impact);
                     Landed?.Invoke(impact);
-                    _vfx?.Dust(new Vector3(_x, 0.05f, PlayerZ), Palette.Cyan, 4 + Mathf.RoundToInt(weight * 8f));
+                    _vfx?.Dust(new Vector3(RouteX, 0.05f, PlayerZ), Palette.Cyan, 4 + Mathf.RoundToInt(weight * 8f));
                     _stepTimer = 0.2f;
                 }
                 if (_airJumpTimer > 0f) _airCharges = 1;
@@ -370,14 +664,25 @@ namespace NeonVelocity.Player
         private void RequestLane(int direction)
         {
             if (!Running) return;
-            int next = LaneMath.ClampLane(Lane + Math.Sign(direction));
+            int step = Math.Sign(direction);
+            if (step == 0) return;
+            _lastLaneDirection = step;
+            int next = LaneMath.ClampLane(Lane + step);
+            next = JunctionRules.ClampLane(next, _junctionState.Plan, _junctionState.Phase, JunctionCommitment);
             if (next == Lane) return;
-            Lane = next;
+            MoveToLane(next, true);
+            _input?.ResetTransient();
+        }
+
+        private void MoveToLane(int lane, bool sound)
+        {
+            lane = LaneMath.ClampLane(lane);
+            if (lane == Lane) return;
+            Lane = lane;
             _xStart = _x;
             _xTarget = LaneMath.LaneToX(Lane);
             _laneTimer = Mathf.Max(0.04f, Config.laneSwitchDuration);
-            App.Audio.PlaySfx("sfx_lane", 0.24f, 0.08f);
-            _input?.ResetTransient();
+            if (sound) App.Audio.PlaySfx("sfx_lane", 0.24f, 0.08f);
         }
 
         private void RequestJump()
@@ -398,7 +703,7 @@ namespace NeonVelocity.Player
                 _slideTimer = 0f;
                 Jumps++;
                 App.Audio.PlaySfx("sfx_jump", 0.65f);
-                _vfx?.Dust(new Vector3(_x, 0.04f, PlayerZ), Palette.Cyan, 6);
+                _vfx?.Dust(new Vector3(RouteX, 0.04f, PlayerZ), Palette.Cyan, 6);
                 return true;
             }
             if (_airCharges > 0)
@@ -408,7 +713,8 @@ namespace NeonVelocity.Player
                 _jumpBufferTimer = 0f;
                 Jumps++;
                 App.Audio.PlaySfx("sfx_jump", 0.5f);
-                _vfx?.Burst(new Vector3(_x, _y + 1f, PlayerZ), Palette.Cyan, 10, 0.2f);
+                _vfx?.Burst(new Vector3(RouteX, _y + 1f, PlayerZ), Palette.Cyan, 10, 0.2f);
+                Visuals?.NotifyDoubleJump();
                 return true;
             }
             return false;
@@ -438,7 +744,7 @@ namespace NeonVelocity.Player
             _slideTimer = Mathf.Max(0.3f, Config.slideDuration);
             Slides++;
             App.Audio.PlaySfx("sfx_slide", 0.6f);
-            _vfx?.Dust(new Vector3(_x, 0.03f, PlayerZ), Palette.Amber, 8);
+            _vfx?.Dust(new Vector3(RouteX, 0.03f, PlayerZ), Palette.Amber, 8);
         }
 
         private void ResolveCollisions()
@@ -454,14 +760,14 @@ namespace NeonVelocity.Player
             {
                 var obstacle = _obstacles[i];
                 if (obstacle == null || !obstacle.Active) continue;
-                if (obstacle.Blocks(_x, halfWidth, minY, maxY, zMin, zMax))
+                if (obstacle.Blocks(RouteX, halfWidth, minY, maxY, zMin, zMax))
                 {
                     HandleHit(obstacle);
                     break;
                 }
                 if (!_nearMissSeen.Contains(obstacle.RuntimeId) &&
                     obstacle.transform.position.z < PlayerZ - 0.8f &&
-                    obstacle.IsNearMiss(_x, halfWidth, PlayerZ - 2f, PlayerZ + 2f))
+                    obstacle.IsNearMiss(RouteX, halfWidth, PlayerZ - 2f, PlayerZ + 2f))
                 {
                     _nearMissSeen.Add(obstacle.RuntimeId);
                     NearMisses++;
@@ -497,7 +803,7 @@ namespace NeonVelocity.Player
                 _invincibleTimer = 1.15f;
                 _bonusScore += 30;
                 App.Audio.PlaySfx("sfx_hit", 0.5f);
-                _vfx?.Impact(new Vector3(_x, _y + 0.8f, PlayerZ), Palette.Magenta);
+                _vfx?.Impact(new Vector3(RouteX, _y + 0.8f, PlayerZ), Palette.Magenta);
                 Crashed?.Invoke();
                 return;
             }
@@ -505,7 +811,7 @@ namespace NeonVelocity.Player
             {
                 _invincibleTimer = 1.1f;
                 App.Audio.PlaySfx("sfx_hit", 0.35f);
-                _vfx?.Impact(new Vector3(_x, _y + 0.8f, PlayerZ), Palette.Amber);
+                _vfx?.Impact(new Vector3(RouteX, _y + 0.8f, PlayerZ), Palette.Amber);
                 Crashed?.Invoke();
                 return;
             }
@@ -515,7 +821,7 @@ namespace NeonVelocity.Player
             {
                 _invincibleTimer = 1.35f;
                 App.Audio.PlaySfx("sfx_hit", 0.8f);
-                _vfx?.Impact(new Vector3(_x, _y + 0.8f, PlayerZ), Palette.Red);
+                _vfx?.Impact(new Vector3(RouteX, _y + 0.8f, PlayerZ), Palette.Red);
                 Crashed?.Invoke();
                 return;
             }
@@ -527,7 +833,7 @@ namespace NeonVelocity.Player
             _shieldCharges--;
             _invincibleTimer = 1.05f;
             App.Audio.PlaySfx("sfx_hit", 0.55f);
-            _vfx?.Impact(new Vector3(_x, _y + 0.9f, PlayerZ), Palette.Cyan);
+            _vfx?.Impact(new Vector3(RouteX, _y + 0.9f, PlayerZ), Palette.Cyan);
             _bonusScore += 50;
             Crashed?.Invoke();
         }
@@ -540,7 +846,7 @@ namespace NeonVelocity.Player
             _invincibleTimer = 0f;
             if (_slowMotionTimer > 0f) StopSlowMotion();
             App.Audio.PlaySfx("sfx_defeat", 0.9f);
-            _vfx?.Impact(new Vector3(_x, _y + 0.9f, PlayerZ), Palette.Red);
+            _vfx?.Impact(new Vector3(RouteX, _y + 0.9f, PlayerZ), Palette.Red);
             if (Visuals != null) Visuals.SetPose(RunnerPose.Dead);
             Died?.Invoke();
         }
@@ -555,7 +861,7 @@ namespace NeonVelocity.Player
                 magnetRadius = Config.coinMagnetRadius * ProgressionMath.UpgradeValue("magnet", _magnetLevel);
                 if (_phaseTimer > 0f) magnetRadius += 2f;
             }
-            Vector3 playerCentre = new Vector3(_x, _y + 0.9f, PlayerZ);
+            Vector3 playerCentre = new Vector3(RouteX, _y + 0.9f, PlayerZ);
             for (int i = 0; i < _credits.Count; i++)
             {
                 var pickup = _credits[i];
@@ -573,7 +879,7 @@ namespace NeonVelocity.Player
                     pickup.SetAttracting(false);
                 }
                 float dz = Mathf.Abs(position.z - PlayerZ);
-                float dx = Mathf.Abs(position.x - _x);
+                float dx = Mathf.Abs(position.x - RouteX);
                 float dy = position.y - playerCentre.y;
                 if (dz < 1.35f && dx < 0.86f && dy > -1.1f && dy < 1.5f) CollectCredit(pickup);
             }
@@ -584,7 +890,7 @@ namespace NeonVelocity.Player
                 var pickup = _powerUps[i];
                 if (pickup == null || pickup.Collected) continue;
                 var position = pickup.transform.position;
-                if (Mathf.Abs(position.z - PlayerZ) < 1.5f && Mathf.Abs(position.x - _x) < 1.1f &&
+                if (Mathf.Abs(position.z - PlayerZ) < 1.5f && Mathf.Abs(position.x - RouteX) < 1.1f &&
                     Mathf.Abs(position.y - (playerCentre.y + 0.3f)) < 1.7f)
                 {
                     ActivatePowerUp(pickup.Definition);

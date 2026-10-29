@@ -132,8 +132,12 @@ namespace NeonVelocity.Persistence
                 var cloud = JsonUtility.FromJson<SaveData>(json);
                 if (cloud == null) return;
                 SaveMigration.Normalise(cloud);
+                if (cloud.schemaVersion < SaveData.CurrentSchemaVersion)
+                    cloud.schemaVersion = SaveData.CurrentSchemaVersion;
                 // Never overwrite a newer local progression with an older cloud copy.
-                if (cloud.xp + cloud.credits * 0.2f >= Data.xp + Data.credits * 0.2f)
+                double cloudProgress = cloud.totalXp + cloud.credits * 0.2;
+                double localProgress = Data.totalXp + Data.credits * 0.2;
+                if (cloudProgress >= localProgress)
                 {
                     int localCredits = Data.credits;
                     Data = cloud;

@@ -15,7 +15,11 @@ namespace NeonVelocity.Core
         CoinRush,
         Survival,
         SeasonalEvent,
-        Tutorial
+        Tutorial,
+        Mission,
+        Distance,
+        BossChase,
+        RouteExploration
     }
 
     public sealed class ModeSpec
@@ -40,9 +44,14 @@ namespace NeonVelocity.Core
         public int SeedSalt;
         public int RecommendedLevel;
         public string AccentHex;
+        /// <summary>Distance that completes the mode, or 0 for an endless run.</summary>
+        public float TargetDistance;
 
         public bool IsTimed => DurationSeconds > 0.01f;
+        public bool HasTargetDistance => TargetDistance > 0.01f;
         public bool HasPowerUps => Id != GameModeId.Tutorial;
+        public bool IsBossChase => Id == GameModeId.BossChase;
+        public bool IsRouteMode => Id == GameModeId.RouteExploration;
     }
 
     /// <summary>Single source of truth for every playable mode's rules.</summary>
@@ -100,7 +109,7 @@ namespace NeonVelocity.Core
                 Objective = "Clear 600 metres on today's deterministic track.",
                 Rules = "Seeded by UTC date. Same layout for every runner. First completion pays a daily bonus.",
                 MaxPlayers = 1, DurationSeconds = 0f, SpeedMultiplier = 1.02f, SeedSalt = 1009,
-                AccentHex = "#28F6FF"
+                AccentHex = "#28F6FF", TargetDistance = 600f
             },
             new ModeSpec
             {
@@ -109,7 +118,7 @@ namespace NeonVelocity.Core
                 Objective = "Reach 1,500 metres on this week's track.",
                 Rules = "Seeded by ISO week. Higher density patterns and an increased credit payout.",
                 MaxPlayers = 1, DurationSeconds = 0f, SpeedMultiplier = 1.06f, CoinMultiplier = 1.5f,
-                SeedSalt = 2003, AccentHex = "#A78BFA"
+                SeedSalt = 2003, AccentHex = "#A78BFA", TargetDistance = 1500f
             },
             new ModeSpec
             {
@@ -136,7 +145,7 @@ namespace NeonVelocity.Core
                 Objective = "Reach 1,000 metres during the Neon Monsoon event.",
                 Rules = "Rain-soaked city visuals, double season XP and a boosted credit multiplier.",
                 MaxPlayers = 1, DurationSeconds = 0f, SpeedMultiplier = 1.04f,
-                CoinMultiplier = 1.5f, AccentHex = "#28F6FF"
+                CoinMultiplier = 1.5f, AccentHex = "#28F6FF", TargetDistance = 1000f
             },
             new ModeSpec
             {
@@ -145,7 +154,43 @@ namespace NeonVelocity.Core
                 Objective = "Complete the guided 300-metre training line.",
                 Rules = "Live prompts teach lane switching, jumping and sliding. No crashes during training.",
                 MaxPlayers = 1, DurationSeconds = 0f, SpeedMultiplier = 0.62f,
-                CountsProgression = false, AllowsCrash = false, AccentHex = "#B6FF3B"
+                CountsProgression = false, AllowsCrash = false, AccentHex = "#B6FF3B", TargetDistance = 300f
+            },
+            new ModeSpec
+            {
+                Id = GameModeId.Mission, Title = "CONTRACT RUN", CodeName = "MISSION",
+                Tagline = "Three clauses. One delivery.",
+                Objective = "Complete a 1,200-metre contract while surviving two hits.",
+                Rules = "A structured contract: one target distance, two lives and a 25% credit bonus. No server account required.",
+                MaxPlayers = 1, DurationSeconds = 0f, SpeedMultiplier = 1.04f, CoinMultiplier = 1.25f,
+                StartingLives = 2, SeedSalt = 3001, AccentHex = "#FFD166", TargetDistance = 1200f
+            },
+            new ModeSpec
+            {
+                Id = GameModeId.Distance, Title = "DISTANCE DRIVE", CodeName = "2 KM",
+                Tagline = "Two kilometres. No excuses.",
+                Objective = "Reach exactly 2,000 metres before your first crash.",
+                Rules = "One life, higher speed and a 25% score bonus. The run completes the instant you cross 2 km.",
+                MaxPlayers = 1, DurationSeconds = 0f, SpeedMultiplier = 1.10f, ScoreMultiplier = 1.25f,
+                SeedSalt = 4001, AccentHex = "#7CFFB2", TargetDistance = 2000f
+            },
+            new ModeSpec
+            {
+                Id = GameModeId.BossChase, Title = "BOSS CHASE", CodeName = "WARDEN PURSUIT",
+                Tagline = "It runs ahead. Close the gap.",
+                Objective = "Catch the warden mech within 1,500 metres.",
+                Rules = "A warden frame weaves ahead of the run. Two lives, faster acceleration and no safe opening after the first kilometre.",
+                MaxPlayers = 1, DurationSeconds = 0f, SpeedMultiplier = 1.16f, StartingLives = 2,
+                SeedSalt = 5003, AccentHex = "#FF3B5C", TargetDistance = 1500f
+            },
+            new ModeSpec
+            {
+                Id = GameModeId.RouteExploration, Title = "ROUTE SURVEY", CodeName = "JUNCTION HUNT",
+                Tagline = "Every fork is a discovery.",
+                Objective = "Survey 2,500 metres and commit through as many junctions as possible.",
+                Rules = "Two lives, 40% extra credits and a route score bonus for every junction branch taken.",
+                MaxPlayers = 1, DurationSeconds = 0f, SpeedMultiplier = 1.02f, CoinMultiplier = 1.4f,
+                StartingLives = 2, SeedSalt = 6007, AccentHex = "#A78BFA", TargetDistance = 2500f
             }
         };
 

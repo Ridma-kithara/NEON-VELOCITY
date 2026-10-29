@@ -67,7 +67,8 @@ namespace NeonVelocity.EditorTools
                 "Hidden/Universal Render Pipeline/GaussianDepthOfField",
                 "Hidden/Universal Render Pipeline/BokehDepthOfField",
                 "Hidden/Universal Render Pipeline/CameraMotionBlur",
-                "Hidden/Universal Render Pipeline/PaniniProjection"
+                "Hidden/Universal Render Pipeline/PaniniProjection",
+                "Hidden/Universal Render Pipeline/UberPost"
             };
 
             var assets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/GraphicsSettings.asset");

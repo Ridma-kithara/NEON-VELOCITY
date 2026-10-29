@@ -1,3 +1,4 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using NeonVelocity.Core;
@@ -157,8 +158,9 @@ namespace NeonVelocity.UI
             rect.anchorMin = new Vector2(0.5f, 1f);
             rect.anchorMax = new Vector2(0.5f, 1f);
             rect.pivot = new Vector2(0.5f, 1f);
-            // In-run feedback must clear the centre timer panel; menu toasts stay at the top.
-            float topOffset = Hud != null && Hud.gameObject.activeInHierarchy ? 150f : 24f;
+            // In-run feedback must clear the centre timer panel and the district callout;
+            // menu toasts stay at the top.
+            float topOffset = Hud != null && Hud.gameObject.activeInHierarchy ? 212f : 24f;
             rect.anchoredPosition = new Vector2(0f, -topOffset - _toasts.Count * 62f);
             rect.sizeDelta = new Vector2(560f, 50f);
             var text = UITheme.Label(panel.transform, "Text", message, UITheme.BodySize, color,
@@ -167,6 +169,18 @@ namespace NeonVelocity.UI
             panel.gameObject.AddComponent<CanvasGroup>();
             _toasts.Add(panel.gameObject);
             StartCoroutine(ToastRoutine(panel.gameObject, duration));
+        }
+
+        /// <summary>
+        /// Hides all active toast panels immediately. The panels stay alive until their own
+        /// lifetime coroutine completes so a fade in progress can never touch a destroyed
+        /// <see cref="CanvasGroup"/>.
+        /// </summary>
+        public void ClearToasts()
+        {
+            for (int i = 0; i < _toasts.Count; i++)
+                if (_toasts[i] != null) _toasts[i].SetActive(false);
+            _toasts.Clear();
         }
 
         private IEnumerator ToastRoutine(GameObject toast, float duration)
@@ -244,6 +258,126 @@ namespace NeonVelocity.UI
         {
             if (_modal != null) Destroy(_modal);
             _modal = null;
+        }
+
+        /// <summary>
+        /// Three-way choice card used where a simple confirm/cancel pair is not enough, such
+        /// as an insufficient GEMS revive offer (BUY GEMS / RESTART / CLOSE). Passing a null
+        /// tertiary label falls back to a two-button layout.
+        /// </summary>
+        public void ShowChoiceModal(string title, string message,
+            string primaryLabel, Action primary,
+            string secondaryLabel, Action secondary,
+            string tertiaryLabel = null, Action tertiary = null)
+        {
+            CloseModal();
+            var root = UITheme.NewRect(OverlayLayer, "Choice Modal");
+            UITheme.Stretch(root);
+            var dim = UITheme.Img(root, "Dim", new Color(0f, 0f, 0f, 0.76f), null, true);
+            UITheme.Stretch((RectTransform)dim.transform);
+            var panel = UITheme.Img(root, "Panel", UITheme.Panel, UITheme.Rounded, true);
+            var rect = (RectTransform)panel.transform;
+            rect.anchorMin = new Vector2(0.5f, 0.5f);
+            rect.anchorMax = new Vector2(0.5f, 0.5f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = new Vector2(840f, 400f);
+            var accent = UITheme.Img(panel.transform, "Accent", UITheme.Magenta);
+            UITheme.Anchor((RectTransform)accent.transform, new Vector2(0f, 0f), new Vector2(0f, 1f),
+                new Vector2(0f, 18f), new Vector2(5f, -18f));
+
+            var heading = UITheme.Label(panel.transform, "Title", title, UITheme.TitleSize, UITheme.White,
+                TextAnchor.MiddleLeft, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)heading.transform, new Vector2(0f, 1f), new Vector2(1f, 1f),
+                new Vector2(36f, -88f), new Vector2(-36f, -24f));
+            var body = UITheme.Label(panel.transform, "Message", message, UITheme.BodySize, UITheme.Dim,
+                TextAnchor.UpperLeft);
+            UITheme.Anchor((RectTransform)body.transform, new Vector2(0f, 0f), new Vector2(1f, 1f),
+                new Vector2(36f, 126f), new Vector2(-36f, -98f));
+
+            var labels = new[] { primaryLabel, secondaryLabel, tertiaryLabel };
+            var actions = new[] { primary, secondary, tertiary };
+            int count = string.IsNullOrEmpty(tertiaryLabel) ? (string.IsNullOrEmpty(secondaryLabel) ? 1 : 2) : 3;
+            float width = (768f - 14f * (count - 1)) / count;
+            for (int i = 0; i < count; i++)
+            {
+                int index = i;
+                var button = UITheme.Button(panel.transform, "Choice " + i, labels[i],
+                    i == 0 ? UITheme.Magenta : (i == 1 ? UITheme.Cyan : UITheme.Muted), () =>
+                    {
+                        CloseModal();
+                        actions[index]?.Invoke();
+                    }, UITheme.BodySize);
+                float x = 36f + i * (width + 14f);
+                UITheme.Anchor((RectTransform)button.transform, new Vector2(0f, 0f), new Vector2(0f, 0f),
+                    new Vector2(x, 30f), new Vector2(x + width, 98f));
+                if (i == 0 && _eventSystem != null) _eventSystem.SetSelectedGameObject(button.gameObject);
+            }
+
+            _modal = root.gameObject;
+            if (HighContrast) ApplyContrast(_modal);
+        }
+
+        private GameObject _loading;
+
+        /// <summary>
+        /// Cinematic loading card shown between closing the menu and the run's first frame.
+        /// Lives on the overlay layer, above every screen, below toasts.
+        /// </summary>
+        public void ShowLoading(string modeTitle, string objective)
+        {
+            HideLoading();
+            var root = UITheme.NewRect(OverlayLayer, "Loading");
+            UITheme.Stretch(root);
+            var dim = UITheme.Img(root, "Dim", new Color(0.004f, 0.01f, 0.022f, 1f));
+            UITheme.Stretch((RectTransform)dim.transform);
+            dim.raycastTarget = true;
+
+            var glow = UITheme.Img(root, "Glow", UITheme.Cyan.Alpha(0.1f), UITheme.Glow, false);
+            UITheme.Anchor((RectTransform)glow.transform, new Vector2(0.5f, 0.42f), new Vector2(0.5f, 0.42f),
+                new Vector2(-700f, -420f), new Vector2(700f, 900f));
+
+            var eyebrow = UITheme.Label(root, "Eyebrow", "NEON VELOCITY", UITheme.SmallSize, UITheme.Cyan,
+                TextAnchor.MiddleCenter, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)eyebrow.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-420f, 132f), new Vector2(420f, 176f));
+
+            var title = UITheme.Label(root, "Title", modeTitle != null ? modeTitle.ToUpperInvariant() : "RUN", 56,
+                UITheme.White, TextAnchor.MiddleCenter, FontStyle.Bold);
+            UITheme.Anchor((RectTransform)title.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-520f, 58f), new Vector2(520f, 118f));
+
+            var objectiveLabel = UITheme.Label(root, "Objective", objective, UITheme.BodySize, UITheme.Dim,
+                TextAnchor.MiddleCenter);
+            UITheme.Anchor((RectTransform)objectiveLabel.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-420f, 18f), new Vector2(420f, 58f));
+
+            var bar = UITheme.Img(root, "Bar", new Color(0.09f, 0.15f, 0.24f, 0.95f), UITheme.Rounded, false);
+            UITheme.Anchor((RectTransform)bar.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-240f, -46f), new Vector2(240f, -18f));
+            var fill = UITheme.Img(bar.transform, "Fill", UITheme.Cyan, UITheme.Rounded, false);
+            var fillRect = (RectTransform)fill.transform;
+            fillRect.anchorMin = Vector2.zero;
+            fillRect.anchorMax = new Vector2(0.02f, 1f);
+            fillRect.offsetMin = Vector2.zero;
+            fillRect.offsetMax = Vector2.zero;
+            var loader = fill.gameObject.AddComponent<LoadingProgress>();
+            loader.BarWidth = ((RectTransform)bar.transform).rect.width;
+            loader.Duration = 0.85f;
+
+            var hint = UITheme.Label(root, "Hint", "CALIBRATING TRACK GRID", UITheme.SmallSize, UITheme.Muted,
+                TextAnchor.MiddleCenter);
+            UITheme.Anchor((RectTransform)hint.transform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f),
+                new Vector2(-300f, -86f), new Vector2(300f, -56f));
+
+            _loading = root.gameObject;
+            var group = _loading.AddComponent<CanvasGroup>();
+            StartCoroutine(FadeGroup(group, 0f, 1f, 0.18f));
+        }
+
+        public void HideLoading()
+        {
+            if (_loading != null) Destroy(_loading);
+            _loading = null;
         }
 
         public void FadeOut(float seconds = 0.25f)
@@ -358,5 +492,21 @@ namespace NeonVelocity.UI
     public sealed class ContrastBackup : MonoBehaviour
     {
         public Color Original;
+    }
+
+    /// <summary>Drives the loading card's bar width to 100% over its duration.</summary>
+    public sealed class LoadingProgress : MonoBehaviour
+    {
+        public float BarWidth = 480f;
+        public float Duration = 0.85f;
+        private float _t;
+
+        private void Update()
+        {
+            var rect = (RectTransform)transform;
+            _t = Mathf.MoveTowards(_t, Duration, Time.unscaledDeltaTime);
+            float eased = 1f - Mathf.Pow(1f - Mathf.Clamp01(_t / Duration), 2.2f);
+            rect.anchorMax = new Vector2(Mathf.Max(0.02f, eased), 1f);
+        }
     }
 }

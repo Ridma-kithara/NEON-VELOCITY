@@ -261,6 +261,47 @@ def music_run() -> List[float]:
     return normalize(buffer, 0.80)
 
 
+def music_run_alt() -> List[float]:
+    """Second running bed: same family, minor-third lift, half-time hats."""
+    bpm = 124.0
+    beat = 60.0 / bpm
+    bar = beat * 4.0
+    chords = [
+        (50, 53, 57),  # Dm
+        (46, 50, 53),  # Bb
+        (53, 57, 60),  # F
+        (48, 52, 55),  # C
+    ]
+    bars = 4
+    duration = bar * bars
+    buffer = [0.0] * int(duration * SAMPLE_RATE)
+    rng = random.Random(303)
+    for b, chord in enumerate(chords):
+        start = b * bar
+        root = midi(chord[0] - 12)
+        for step in range(8):
+            add(buffer, start + step * beat * 0.5,
+                note_wave(root, beat * 0.44, gain=0.20, wave_fn=soft_saw,
+                          attack=0.006, decay=0.1, sustain=0.55, release=0.05))
+        for step in range(8):
+            note = chord[step % 3] + (12 if step % 3 == 0 else 24)
+            add(buffer, start + step * beat * 0.5,
+                note_wave(midi(note), beat * 0.3, gain=0.05, wave_fn=sine,
+                          attack=0.004, decay=0.06, sustain=0.25, release=0.05))
+        for step in range(4):
+            add(buffer, start + step * beat, kick(gain=0.36))
+            if step in (1, 3):
+                add(buffer, start + step * beat, snare(gain=0.20, rng=rng))
+            add(buffer, start + step * beat + beat * 0.5, hat(gain=0.07, rng=rng))
+        for note in chord:
+            add(buffer, start + bar - beat * 0.75,
+                note_wave(midi(note + 12), beat * 0.6, gain=0.06, wave_fn=soft_saw,
+                          attack=0.008, decay=0.16, sustain=0.25, release=0.18))
+    buffer = delay(buffer, beat * 0.62, feedback=0.26, mix=0.20)
+    edge_fade(buffer, 0.03)
+    return normalize(buffer, 0.78)
+
+
 # ---- ambience ------------------------------------------------------------------------
 
 
@@ -337,6 +378,55 @@ def ambience_rain() -> List[float]:
     for i in range(len(buffer)):
         t = i / SAMPLE_RATE
         buffer[i] += math.sin(TAU * 38.0 * t) * 0.03
+    return buffer
+
+
+def ambience_snow() -> List[float]:
+    duration = 8.0
+    buffer = filtered_noise(duration, 520.0, 0.18, seed=801, modulation=0.7)
+    for i in range(len(buffer)):
+        t = i / SAMPLE_RATE
+        whistle = math.sin(TAU * 620.0 * t + math.sin(TAU * 0.07 * t) * 3.0) * 0.018
+        whistle += math.sin(TAU * 930.0 * t + math.sin(TAU * 0.05 * t) * 2.0) * 0.010
+        buffer[i] += whistle
+    return buffer
+
+
+def ambience_forest() -> List[float]:
+    duration = 8.0
+    buffer = filtered_noise(duration, 340.0, 0.16, seed=901, modulation=0.45)
+    rng = random.Random(902)
+    for _ in range(14):
+        start = rng.uniform(0.0, duration - 0.18)
+        freq = rng.uniform(1800.0, 3400.0)
+        chirp = note_wave(freq, 0.12, gain=rng.uniform(0.012, 0.030), wave_fn=sine,
+                          attack=0.006, decay=0.04, sustain=0.3, release=0.06)
+        add(buffer, start, chirp)
+    for i in range(len(buffer)):
+        t = i / SAMPLE_RATE
+        buffer[i] += math.sin(TAU * 63.0 * t) * 0.014
+    return delay(buffer, 0.28, feedback=0.18, mix=0.14)
+
+
+def ambience_coast() -> List[float]:
+    duration = 8.0
+    buffer = filtered_noise(duration, 900.0, 0.20, seed=1001, high_pass=True, modulation=0.85)
+    for i in range(len(buffer)):
+        t = i / SAMPLE_RATE
+        swell = (0.5 + 0.5 * math.sin(TAU * 0.16 * t)) ** 3
+        buffer[i] *= 0.35 + swell * 0.65
+        buffer[i] += math.sin(TAU * 46.0 * t) * 0.02 * swell
+    return buffer
+
+
+def ambience_volcanic() -> List[float]:
+    duration = 8.0
+    buffer = filtered_noise(duration, 120.0, 0.34, seed=1101, modulation=0.35)
+    for i in range(len(buffer)):
+        t = i / SAMPLE_RATE
+        pulse = (0.5 + 0.5 * math.sin(TAU * 0.23 * t)) ** 4
+        buffer[i] += math.sin(TAU * 31.0 * t) * 0.10
+        buffer[i] += math.sin(TAU * 62.0 * t + math.sin(TAU * 0.4 * t)) * 0.035 * pulse
     return buffer
 
 
@@ -541,11 +631,16 @@ def sfx_daily() -> List[float]:
 BUILDERS: List[Tuple[str, Callable[[], List[float]], float]] = [
     ("music_menu", music_menu, 0.72),
     ("music_run", music_run, 0.80),
+    ("music_run_alt", music_run_alt, 0.78),
     ("ambience_city", ambience_city, 0.55),
     ("ambience_skyway", ambience_skyway, 0.55),
     ("ambience_reactor", ambience_reactor, 0.55),
     ("ambience_tunnel", ambience_tunnel, 0.55),
     ("ambience_rain", ambience_rain, 0.55),
+    ("ambience_snow", ambience_snow, 0.55),
+    ("ambience_forest", ambience_forest, 0.55),
+    ("ambience_coast", ambience_coast, 0.55),
+    ("ambience_volcanic", ambience_volcanic, 0.55),
     ("sfx_jump", sfx_jump, 0.85),
     ("sfx_land", sfx_land, 0.85),
     ("sfx_slide", sfx_slide, 0.80),
