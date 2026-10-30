@@ -297,7 +297,7 @@ curl -sS http://127.0.0.1:8088/api/v1/health
   catalogue, transaction cache and ownership before syncing.
 - The client keeps no admin credential and exposes no approval, ledger or price-editing
   route. `NV_ADMIN_*` values stay on the server.
-- Unity IAP is installed (`com.unity.purchasing` 4.15.1). The store products must use the
+- Unity IAP is installed (`com.unity.purchasing` 5.4.4). The store products must use the
   backend package ids by default: `gems_80`, `gems_200`, `gems_500`, `gems_1200`, `gems_2500`.
   If store console rules require different ids, add an alias in `NV_APPLE_PRODUCT_MAP` or
   `NV_GOOGLE_PLAY_PRODUCT_MAP` **and** register that same store id in the client build.

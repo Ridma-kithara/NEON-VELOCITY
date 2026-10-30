@@ -25,7 +25,8 @@ This report separates checks that were actually executed from work that remains 
 | WebGL player build | Not built | Unverified |
 | Windows/Linux player builds | Not built | Unverified |
 | Android APK/AAB | Not built | Unverified |
-| iOS Xcode export | Not built | Unverified |
+| iOS Xcode export | **Generated** at `Builds/iOS` (1133.8 MiB; 16.7 s warm export), IL2CPP, film-grain resources and IAP StoreKit plugin present; `xcodebuild -list` parses | Executed (export) |
+| iOS unsigned device compile | **Succeeded**, `xcodebuild` `Release` / `iphoneos` without signing; `NEONVELOCITY.app` arm64, iOS 15.0, about 140 MB, **0 errors** | Executed (unsigned) |
 | Live provider purchase (Stripe/Apple/Google) | No real transaction completed | Unverified |
 | Full manual playthrough of every mode | Not completed | Unverified |
 | Real-device touch/gamepad/audio | Not performed | Unverified |
@@ -33,7 +34,7 @@ This report separates checks that were actually executed from work that remains 
 | Real-network two/five-client race | Not performed | Unverified |
 | Performance/memory profiling, signing/notarisation | Not performed | Unverified |
 
-**Conclusion:** the core logic, authority, Unity runtime bootstrap, expanded EditMode/PlayMode coverage, contextual navigation, settings presets/persistence, garage preview lifecycle, purchase-confirmation guard, infinite progression, twenty-district 3 km zoning, seven-state time-of-day resolution, v5 save migration, exact-position revive, genuine nine-shape junction routing and Phase 03 shop/payment UI are verified for the routes listed in [QA_REPORT.md](../QA_REPORT.md). A PlayMode test drives the real `TrackManager` through 30,030 m and checks the 3/6/9/15/30 km checkpoints, every district announcement, at least 40 junction windows, non-decreasing difficulty, bounded 14-segment/pool budgets and a save round-trip. The premium/account service is verified end-to-end at the HTTP/SQLite layer (79 tests across race authority, accounts/auth, wallet/catalogue, Stripe/Apple/Google verification, receipts, refunds and operator CLI), including idempotent purchases/revives and **no live provider sale is claimed**. Stripe, Apple and Google are exercised with stubs/generated keys; Apple/Google store billing and native sign-in remain unconfigured. The visual pass was repeated on the final Phase 03 build as a fresh 18-screen 1280×800 set, including the post-fix GEM shop; the 1600×900 and actual 3840×2160 sets are the Phase 02 captures. The player-build black-world defect was fixed by removing the broken SSAO renderer feature, disabling URP unused-variant stripping for runtime-built materials and always including `UberPost`. No physical 4K display or 4K performance profile was available. Other platforms, broader manual gameplay coverage, real devices/networks and release packaging remain outstanding.
+**Conclusion:** the core logic, authority, Unity runtime bootstrap, expanded EditMode/PlayMode coverage, contextual navigation, settings presets/persistence, garage preview lifecycle, purchase-confirmation guard, infinite progression, twenty-district 3 km zoning, seven-state time-of-day resolution, v5 save migration, exact-position revive, genuine nine-shape junction routing and Phase 03 shop/payment UI are verified for the routes listed in [QA_REPORT.md](../QA_REPORT.md). A PlayMode test drives the real `TrackManager` through 30,030 m and checks the 3/6/9/15/30 km checkpoints, every district announcement, at least 40 junction windows, non-decreasing difficulty, bounded 14-segment/pool budgets and a save round-trip. The premium/account service is verified end-to-end at the HTTP/SQLite layer (79 tests across race authority, accounts/auth, wallet/catalogue, Stripe/Apple/Google verification, receipts, refunds and operator CLI), including idempotent purchases/revives and **no live provider sale is claimed**. Stripe, Apple and Google are exercised with stubs/generated keys; Apple/Google store billing and native sign-in remain unconfigured. The visual pass was repeated on the final Phase 03 build as a fresh 18-screen 1280×800 set, including the post-fix GEM shop; the 1600×900 and actual 3840×2160 sets are the Phase 02 captures. The player-build black-world defect was fixed by removing the broken SSAO renderer feature, keeping URP general variant stripping disabled for the PC/Deferred level and always including `UberPost`. An iOS Xcode project is generated, parses in Xcode and compiles unsigned for `iphoneos`; signing, archive and device testing remain. No physical 4K display or 4K performance profile was available. Other platforms, broader manual gameplay coverage, real devices/networks and release packaging remain outstanding.
 
 ## 2. Headless core tests
 
@@ -204,6 +205,43 @@ Mach-O universal binary with 2 architectures:
 
 The app is ad-hoc signed (`Signature=adhoc`) and has no Developer ID or notarisation. It launched on the Intel host, completed the full 18-screen capture run and exited cleanly. The final Player.log contains no `ArgumentNullException`, no URP "shader stripped" messages and no Input System exceptions.
 
+### iOS Xcode export
+
+The iOS module and Xcode 26.6 / iPhoneOS 26.5 SDK are installed. The earlier `Unknown in 0 seconds` result was caused by stale Unity IAP 4.x assembly references (`UnityEngine.Purchasing`) after the project resolved **Unity IAP 5.4.4**; the runtime asmdef now uses `Unity.Purchasing` / `Unity.Purchasing.Stores`. The editor tools assembly references the URP runtime so `BuildIOS` can temporarily enable general variant stripping for the forward-only Mobile level and restore it afterward.
+
+```bash
+UNITY="/Applications/Unity/Hub/Editor/6000.6.7f1/Unity.app/Contents/MacOS/Unity"
+"$UNITY" -batchmode -quit -projectPath "$PROJECT" \
+  -executeMethod NeonVelocity.EditorTools.BuildTools.BuildIOS \
+  -logFile "$PROJECT/Builds/build-ios.log"
+```
+
+**Build result**
+
+```text
+[BUILD] Succeeded: Builds/iOS (1133.8 MiB, 16.7s)
+Build Finished, Result: Success.
+```
+
+The final warm export took **16.7 s**; the first stripped export took **46.0 s** of build time. `xcodebuild -list` parses the generated project and reports `Unity-iPhone`, `Unity-iPhone Tests`, `UnityFramework` and `GameAssembly` targets plus `GameAssembly`, `Unity-iPhone` and `UnityFramework` schemes. The export contains the Unity IAP StoreKit plugin, `StoreKit.framework`, film-grain runtime resources and bundle identifier `games.rkvantage.neonvelocity`.
+
+**Unsigned Xcode device compile**
+
+```bash
+xcodebuild -project Builds/iOS/Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+  -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+  -derivedDataPath /tmp/nv-derived \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+```
+
+```text
+** BUILD SUCCEEDED **
+```
+
+The output is `NEONVELOCITY.app` (about 140 MB): arm64, `MinimumOSVersion` 15.0, bundle id `games.rkvantage.neonvelocity`, unsigned, **0 errors** across 67 warnings (mostly Unity-generated script-phase/sandbox notices). This proves the generated project compiles for a device; it is **not** an installable signed build.
+
+The unstripped Lit `ForwardLit` fragment pass reported **1,769,472** Metal variants and made the export impractically slow. With general stripping enabled for the Mobile level it dropped to **32**; a macOS Mobile-quality capture using the same stripping rendered the world correctly. General stripping remains off for the PC/Deferred quality level, whose runtime-created materials need the full set. URP post-processing resource stripping stays off, and `BuildIOS` restores the global-settings asset after export, so the runtime film-grain resources are retained in both the player and the editor project. **No signed archive, device install or live IAP purchase was performed.**
+
 ### Runtime fixes required for the player
 
 1. **Editor-only build tooling** — split into `NeonVelocity.EditorTools` so runtime compilation does not reference `UnityEditor`.
@@ -213,7 +251,7 @@ The app is ad-hoc signed (`Signature=adhoc`) and has no Developer ID or notarisa
 5. **Input System** — replaced the last legacy `UnityEngine.Input.GetKeyDown` pause check with Input System keyboard/gamepad reads, eliminating per-frame `InvalidOperationException`s.
 6. **Track mesh in the player** — the two-stage `Mesh.CombineMeshes` path produced zeroed vertex positions in the macOS player, so the generated road and city were frustum-culled. `DecorMeshBuilder` now copies and transforms vertex/triangle/normal/UV streams directly, rebuilds tangents and bounds, and the track renders in the verified player.
 7. **SSAO renderer feature** — `ScreenSpaceAmbientOcclusion` remained in `PC_Renderer.asset`, but its stripped resources threw inside `TryPrepareResources` while URP constructed the renderer. The feature was removed; the PC renderer now uses Forward+ with native render pass and no renderer features.
-8. **Runtime material variant stripping** — even after the SSAO removal, URP unused-variant stripping removed variants that runtime-created world materials require, so the player drew only the camera clear colour. `m_StripUnusedVariants` is now `0` in all three global-settings locations, and `Hidden/Universal Render Pipeline/UberPost` is in Always Included Shaders. An offscreen camera probe returned only the clear colour before the fix and scene content after it.
+8. **Runtime material variant stripping** — even after the SSAO removal, URP unused-variant stripping removed variants that runtime-created world materials require, so the player drew only the camera clear colour. `m_StripUnusedVariants` is now `0` in all three global-settings locations for the PC/Deferred quality level, and `Hidden/Universal Render Pipeline/UberPost` is in Always Included Shaders. An offscreen camera probe returned only the clear colour before the fix and scene content after it. The iOS build enables general stripping temporarily for the forward-only Mobile level (see the iOS export section).
 
 ### Visual capture pass
 
@@ -253,7 +291,7 @@ The validator checks meta/GUID integrity, build-scene configuration, empty boot 
 | Audible audio mix and spatial balance | 32 clips load without missing-resource errors; trigger path not audibly validated and no loudness measurement was performed |
 | Every power-up, pickup, junction branch, upgrade, collision and result path | Not individually exercised at runtime |
 | Live provider purchase (Stripe/Apple/Google) | No HTTPS deployment, merchant credentials, store products, test account or real transaction was supplied. Checkout opening is not success; GEMS require server verification |
-| Real iOS/Android Unity IAP purchase | Unity IAP is integrated and compiles, but no store product, merchant account or device build was available |
+| Real iOS/Android Unity IAP purchase | Unity IAP 5.4.4 compiles and is included in the iOS Xcode export, but no store product, merchant account, signing team or device test was available |
 | Live email/SMS/Apple/Google identity | No SMTP/SMS credentials or native Google/Apple sign-in plugin. Server token verifiers are tested with generated keys |
 | Unity HTTP purchase/revive against a deployed premium server | Client protocol compiles and offline/insufficient paths are tested; live HTTP integration remains a deployment QA step |
 | Drone chases, moving platforms, destructible sections, temporary vehicles, explicit Friend Challenge/Limited-Time Event entries, full 90° T-turn/curve junctions | Not implemented; see Known Limitations |
@@ -262,7 +300,8 @@ The validator checks meta/GUID integrity, build-scene configuration, empty boot 
 | LOD, occlusion and dynamic foliage wind | Not implemented in this environment slice; merged static geometry was chosen for draw-call control |
 | Two- and five-client races with real Unity clients | Backend loopback tests only; no multi-client Unity run |
 | Reconnect/disconnect on real clients | Server logic tested; client UI path not exercised |
-| Windows/Linux/WebGL/Android/iOS builds | Not built here; platform modules/tooling not all available |
+| Windows/Linux/WebGL/Android builds | Not built here; platform modules/tooling not all available |
+| Signed iOS archive/device install | Xcode project generated, but no Apple team, provisioning profile or device was available |
 | Touch, gamepad, audio balance, suspend/resume on devices | No real-device testing |
 | Frame time, memory, battery, thermals | No profiling pass |
 | macOS signing, notarisation, hardened runtime | No Developer ID/certificate configured |

@@ -15,7 +15,7 @@ Use Unity Hub → **Installs → 6000.6.7f1 → Add modules**:
 | Android APK/AAB | Android Build Support + SDK/NDK + OpenJDK | keystore for release signing |
 | iOS | iOS Build Support | macOS + Xcode |
 
-At hand-off, **macOS player support** was available and produced a verified universal build. Windows, Linux, Android and iOS modules were not available/verified here. No Android SDK, NDK or `adb` was present.
+At hand-off, **macOS and iOS player support** are installed. The macOS universal player is verified; the iOS module and Xcode are present, but no signed device/archive build has been produced here. Windows, Linux and Android modules are not installed. No Android SDK, NDK or `adb` is present.
 
 An active Unity licence is required before importing or building. The licence used for the verified build was a Personal entitlement.
 
@@ -37,8 +37,8 @@ This applies and saves:
 - Build scene list: only `Assets/Game/Scenes/Main.unity`, enabled
 - Runtime URP shader templates under `Assets/Game/Resources/Materials/`, so URP/Lit and URP/Unlit variants remain available to runtime-created materials
 - Always-included post-processing shaders (Bloom, Gaussian/Bokeh DoF, motion blur, Panini, UberPost)
-- URP unused-post-processing-resource stripping disabled so runtime-created volume profiles work
-- URP unused-variant stripping disabled in `UniversalRenderPipelineGlobalSettings.asset`; every world material is created at runtime, so its variants must not be removed
+- URP unused-post-processing variant/resource stripping **disabled** because the game builds its volume profile at runtime and uses film grain; the six runtime material templates and always-included post shaders remain in the build
+- URP general unused-variant stripping **disabled** in `UniversalRenderPipelineGlobalSettings.asset`; every world material is created at runtime, so its variants must not be removed (enabling it reproduces the black-world defect)
 - PC renderer uses Forward+ with native render pass and no renderer features (the broken SSAO feature was removed)
 
 The same settings are already persisted in `ProjectSettings/ProjectSettings.asset` and `ProjectSettings/EditorBuildSettings.asset`, but running the menu item is recommended after changing Unity versions.
@@ -120,11 +120,32 @@ CI hosts need a Unity licence (licensed runner or floating licence) and the matc
 
 ### iOS
 
-- Requires macOS, Xcode and the iOS Build Support module.
-- **Build iOS Xcode Project** writes a project to `Builds/iOS`; open it in Xcode, set a signing team and run/archive there.
-- Unity generates the Xcode project but this repository does not configure provisioning profiles, capabilities or App Store metadata.
-- If connecting to a LAN server, iOS local-network privacy requirements may require adding a local network usage description in the generated Xcode project. This has not been verified.
+- Requires macOS, Xcode and the **iOS Build Support** module. Confirm with `xcodebuild -version` and Unity Hub → Installs → Add modules.
+- In Unity use **NEON VELOCITY → Build iOS Xcode Project**, or run:
+
+  ```bash
+  "$UNITY" -batchmode -quit -projectPath "$PROJECT" \
+    -executeMethod NeonVelocity.EditorTools.BuildTools.BuildIOS \
+    -logFile "$PROJECT/Builds/build-ios.log"
+  ```
+
+- The Xcode project is written to `Builds/iOS`. Open `Builds/iOS/Unity-iPhone.xcodeproj` in Xcode, select the project and set your Apple developer team under **Signing & Capabilities** for both the **Unity-iPhone** and **UnityFramework** targets, enable **Automatically manage signing**, then run on a device or **Product → Archive** for TestFlight/App Store. `GameAssembly` is a static-library target and does not need a team.
+- Unity configures bundle ID `games.rkvantage.neonvelocity`, iOS 15.0 minimum, landscape-only and IL2CPP. It does **not** create an Apple team, provisioning profile, App Store record, icons or privacy metadata.
+- If connecting to a LAN server, iOS local-network privacy requirements may require a local network usage description in the generated Xcode project. This has not been verified.
 - Online requires TCP reachability; no TLS or App Transport Security changes are configured.
+- The first iOS build compiles Metal shader variants and is slower than macOS. iOS uses the forward-only **Mobile** quality level, so `BuildIOS` temporarily enables URP general variant stripping for that build and restores the project setting afterwards. The PC/Deferred quality level keeps general stripping disabled because its runtime-created materials need the unstripped variant set; enabling it there reproduces the black-world defect. URP post-processing resource stripping stays disabled so the runtime volume profile keeps film grain; `BuildIOS` also snapshots and restores the global-settings asset so the build cannot leave those resources stripped from the editor project.
+- A build result of **Unknown in 0 seconds** means the player was never built. Check the Unity Console for `error CS...` and `Error building Player because scripts have compile errors`. With Unity IAP 5.x the assembly names are `Unity.Purchasing` and `Unity.Purchasing.Stores`; the old 4.x `UnityEngine.Purchasing` references cause exactly this failure.
+
+Verified export in this environment: `[BUILD] Succeeded: Builds/iOS (1133.8 MiB, 16.7s)`; the first stripped export took 46.0 s. `xcodebuild -list -project Builds/iOS/Unity-iPhone.xcodeproj` reports the `Unity-iPhone`, `Unity-iPhone Tests`, `UnityFramework` and `GameAssembly` targets and the `GameAssembly`, `Unity-iPhone` and `UnityFramework` schemes. The export includes `StoreKit.framework`, the Unity IAP StoreKit plugin and the film-grain runtime resources. An unsigned device compile also succeeds:
+
+```bash
+xcodebuild -project Builds/iOS/Unity-iPhone.xcodeproj -scheme Unity-iPhone \
+  -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+# ** BUILD SUCCEEDED ** — NEONVELOCITY.app, arm64, iOS 15.0, about 140 MB, 0 errors
+```
+
+It is **unsigned**; opening it in Xcode and selecting a team is the remaining signing step.
 
 ## 6. Server and premium endpoints for builds
 
@@ -144,7 +165,7 @@ The server has no authentication beyond ephemeral session tokens and no TLS. Use
 - Changing the endpoint clears that profile's cached GEM balance, transaction history, token and entitlements before the next sync. Server state remains authoritative; an unreachable service shows **STORE OFFLINE** and cannot sell or revive.
 - The service is separate from the race authority. Deploy `Backend/premium_server.py` behind an HTTPS reverse proxy with admin credentials, backups and monitoring. Full procedure: [PREMIUM_DEPLOYMENT.md](../Backend/PREMIUM_DEPLOYMENT.md).
 - Five GEM tiers are served and can be overridden with `NV_GEM_PACKAGE_<ID>_{GEMS,BONUS_GEMS,PRICE_LKR,NAME,DESCRIPTION,ENABLED}`. Stripe-hosted checkout needs a server secret, price IDs, webhook secret and HTTPS return pages. The Unity client never receives secret keys or price IDs.
-- **Unity IAP 4.15.1 is integrated** (`com.unity.purchasing`) for Apple In-App Purchase on iOS and Google Play Billing on Android. The client forwards the store receipt/token to the backend, which verifies it before crediting GEMS. Store products must use the backend package ids (`gems_80`, `gems_200`, ...) unless matching alias maps are configured on both server and client.
+- **Unity IAP 5.4.4 is integrated** (`com.unity.purchasing`) for Apple In-App Purchase on iOS and Google Play Billing on Android. The client forwards the store receipt/token to the backend, which verifies it before crediting GEMS. Store products must use the backend package ids (`gems_80`, `gems_200`, ...) unless matching alias maps are configured on both server and client.
 - **No store product or merchant account is configured.** The shop reads `/api/v1/store/payments` and will not start a platform purchase when the matching provider capability is absent. Apple/Google billing cannot be called live until the store products, credentials and device builds exist.
 - The retired manual bank-transfer flow is **off by default**. Only `NV_ENABLE_MANUAL_BANK_TRANSFER=1` re-enables the legacy routes, and it is not shown in the Phase 03 shop.
 - Account/cloud-sync endpoints run in the same service. Email verification/reset/receipt delivery needs SMTP credentials; phone OTP needs an SMS gateway. Server-side Google ID-token and Apple identity-token verification exist, but the Unity build has no native Google/Apple sign-in plugin.
@@ -161,9 +182,10 @@ A target is only "verified" after all of the following on real hardware:
 - [ ] The backend starts, and 2–5 humans can match, ready, count down, race and receive results.
 - [ ] A player can disconnect and reconnect within 45 s without losing their slot.
 - [x] macOS build succeeds and launches outside the editor (**universal, launched on Intel**).
+- [x] iOS Xcode project is generated, parses in Xcode, includes the Unity IAP StoreKit plugin and compiles for `iphoneos` without signing (**unsigned; no device run**).
 - [ ] Audio is audible and input works with the target's keyboard/gamepad/touch.
 - [ ] Online connectivity is tested from the target network (WebGL expected to fail by design).
 - [ ] The deployed premium endpoint is set and STORE OFFLINE, catalogue, one sandbox purchase per provider, duplicate replay, receipt, refund, ownership, transaction-history and revive paths are tested against it.
 - [ ] Signing/store packaging (Android/iOS/macOS) is completed separately.
 
-The macOS universal build has been produced and launched. Windows/Linux/WebGL/Android/iOS builds have not; see [TEST_REPORT.md](TEST_REPORT.md).
+The macOS universal build has been produced and launched; the iOS Xcode project has been generated and compiled unsigned for `iphoneos`. Windows/Linux/WebGL/Android builds and a signed iOS archive/device run have not; see [TEST_REPORT.md](TEST_REPORT.md).

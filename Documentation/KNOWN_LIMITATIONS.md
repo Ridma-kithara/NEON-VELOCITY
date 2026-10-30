@@ -12,13 +12,14 @@ This document records what is genuinely complete, what is constrained by the cur
 - **18 / 18** Unity PlayMode tests passed, including a real 30 km `TrackManager` stream across 3/6/9/15/30 km checkpoints with bounded pools, district/junction assertions and a save round-trip; plus real bootstrap, title stage, Practice start, clean shutdown, quick-tap jump regression, centralized navigation/Back routes, Settings-from-Pause, Results return, restart into a fresh run, garage cleanup, purchase-confirmation safety, Phase 03 shop tabs and removal of retired bank-transfer copy, offline transaction-history state, Account/Events/World Atlas/Achievements construction, PHANTOM X ability/cooldown, exact-distance revive without a world reset, premium-endpoint cache reset, main-menu destination-label visibility, independent HUD score/distance tickers, and HUD/toast suppression and restoration across pause.
 - Progression, nine-junction safety, 20-district 3 km zoning/discovery, seven-state time-of-day resolution, signature-hazard fairness, 15 modes and save-v5 migration are covered across the headless core and EditMode suites; PlayMode covers the runtime UI, ability, revive and 30 km stream routes. The premium/payment/account service was exercised end-to-end at the HTTP/SQLite layer, including catalogue overrides, admin account/transaction review, GEM refund reversal, Stripe signed-webhook credit/refund, Apple receipt verification, Google Play service-account verification, receipt construction, duplicate purchase handling, account lifecycle, conflict-safe cloud sync and idempotent purchase/revive debit.
 - Developer-run captures of **18 screens** at 1600×900, 1280×800 and 3840×2160 confirmed the generated Phase 02 menu, HUD, settings, garage, modes, account tabs, events, world atlas, achievements, character roster, five-tier GEM catalogue, corrected wallet account row/disclaimer, full-length button labels, beveled runner, rain-slicked road, raised sidewalks, recessed storefronts, layered facades, street trees/furniture, warm practical pools, layered skyline, textured rain, an active biome crossfade and a seeded subway-station segment render in the player. The 1600×900 and 3840×2160 sets predate the Phase 03 shop rewrite; a fresh **18-screen 1280×800** Phase 03 set captured from the final post-fix build includes the rebuilt GEM shop (`Captures/phase03/1280x800`). The other shop tabs and receipt-success states remain code/PlayMode-only. The 4K PNGs are actual 3840×2160 output; no physical 4K display was available. This is a smoke check, not a full manual graphics review.
-- A universal **x86_64 + ARM64** macOS player (`Builds/macOS/NeonVelocity.app`) is built from the Phase 03 source with **Unity IAP 4.15.1** and launched. The app is **ad-hoc signed** only; there is no Developer ID, hardened runtime or notarisation.
+- A universal **x86_64 + ARM64** macOS player (`Builds/macOS/NeonVelocity.app`) is built from the Phase 03 source with **Unity IAP 5.4.4** and launched. The app is **ad-hoc signed** only; there is no Developer ID, hardened runtime or notarisation.
+- An **iOS Xcode project** (`Builds/iOS/Unity-iPhone.xcodeproj`) is generated from the same source with IL2CPP and Unity IAP 5.4.4. `xcodebuild -list` parses its targets/schemes, the export includes `StoreKit.framework`, the Unity StoreKit plugin and film-grain runtime resources, and an unsigned `Release` / `iphoneos` compile produced a 140 MB arm64 app without errors. It is **unsigned**; no Apple team, provisioning profile, archive, device install or device run exists yet.
 
 ### Still unverified
 
 - A full manual playthrough of all 15 modes, every power-up, collision, junction branch, pickup, result and persistence path.
 - Two- and five-client races with real Unity clients; reconnect/disconnect through the game UI.
-- Windows, Linux, WebGL, Android and iOS player builds.
+- Windows, Linux, WebGL and Android player builds; a signed iOS archive/device install.
 - Real-device touch, gamepad, audio, suspend/resume and performance.
 - Frame time, memory, battery and thermal profiling.
 - Audible audio balance, loudness and device output for the 32 synthesized clips; only missing-resource checks were performed.
@@ -47,7 +48,7 @@ This document records what is genuinely complete, what is constrained by the cur
 | Linux 64-bit | Implemented | Implemented | Not built (module/tooling not verified) |
 | WebGL | Implemented | **Not supported** | Not built |
 | Android | Implemented | Implemented in code | Not built (Android module/SDK absent) |
-| iOS | Implemented | Implemented in code | Not built (iOS module absent) |
+| iOS | Implemented | Implemented in code | **Xcode project generated**; unsigned, no device/archive run |
 
 Do not claim a platform is supported until its build has been made, launched and tested on real hardware. macOS is the only target with a confirmed launch here, and its broader gameplay/manual pass is still outstanding.
 
@@ -135,15 +136,15 @@ Bots fill empty slots to five and are simulated by the server at 17.0–23.5 m/s
 - No frame-time, memory, battery, thermal or loading-time profiling exists for any target. The procedural runtime world and UI may need optimization on low-end Android/iOS devices. The 4K capture proves output, not a 4K frame-rate target.
 - The environment slice has no explicit LOD, occlusion culling or GPU-instancing pass, and tree/foliage animation is static merged geometry. Street-level light pools and rain are deliberately subtle; storefront interiors repeat within a theme.
 - WebGL autoplay policies may delay or mute audio until user interaction; this is not verified.
-- URP renderer selection and the core runtime shader set have been validated in the built player; unused-variant stripping is intentionally disabled because the world and its materials are created at runtime. A full visual/quality pass across all 20 districts and every quality preset has not been performed.
+- URP renderer selection and the core runtime shader set have been validated in the built player. General unused-variant stripping remains disabled for the PC/Deferred quality level because its world materials are created at runtime; the iOS build enables it only for the forward-only Mobile level and restores the setting afterward. A full visual/quality pass across all 20 districts and every quality preset has not been performed.
 - The runtime generates materials and meshes; repeated rapid restarts could stress memory management. This has not been measured.
 - One automated macOS Metal capture run produced a tiled/duplicated-UI readback image. Clean reruns and the final 18-screen capture sets were inspected; the artifact was not reproduced by PlayMode tests or found in the player log. It remains a QA-tooling risk until live compositor capture can be checked.
 
 ## 6. Platform/package constraints
 
-- macOS player support was available and a universal build succeeded. Windows, Linux, Android and iOS modules were not available/verified here and must be added through Unity Hub.
+- macOS and iOS player support are installed; the macOS universal build succeeded and the iOS Xcode project was generated and compiles unsigned. Windows, Linux and Android modules are not installed and must be added through Unity Hub.
 - No Android SDK, NDK, OpenJDK, device or `adb` is available. No keystore is included.
-- No Xcode iOS export, provisioning profile, signing team or App Store metadata is configured.
+- The iOS Xcode project is generated and compiles unsigned for `iphoneos`, but no Apple team, provisioning profile, signed archive, device install or App Store metadata is configured.
 - No macOS notarisation, hardened runtime, entitlements or Developer ID signing identity is configured; the tested build is ad-hoc signed.
 - Unity's player settings persist a default host of `127.0.0.1:7777`. Every remote device must change this in Settings; a build shipped with defaults only connects to a server on the same device.
 - The race server requires TCP port 7777 (or configured port) to be reachable. No relay, NAT traversal, UPnP, matchmaking service or domain/TLS setup exists.
@@ -153,7 +154,7 @@ Bots fill empty slots to five and are simulated by the server at 17.0–23.5 m/s
 ## 7. Documentation and licensing constraints
 
 - The project is maintained in the GitHub repository `Ridma-kithara/NEON-VELOCITY`, but has **no CI pipeline**, code-signing identity or release channel. Builds and releases must be produced separately.
-- URP post-processing resource stripping is disabled in `UniversalRenderPipelineGlobalSettings.asset` so runtime-created volume profiles keep Bloom, depth of field, motion blur and Panini shaders. This increases player size slightly; the tested macOS bundle is 122.5 MiB.
+- URP post-processing variant/resource stripping is disabled in `UniversalRenderPipelineGlobalSettings.asset` because the volume profile (including film grain) is created at runtime; the always-included post-processing shaders and six runtime material templates remain in the build. This increases the iOS Metal shader set and build time but preserves the tested post-processing look. The tested macOS bundle is 122.5 MiB.
 - Third-party packages are Unity packages only (URP, Input System, uGUI, Test Framework, IDE integrations), governed by Unity's package/template licences. There is no third-party runtime dependency list beyond Unity itself and Python's standard library.
 - Original assets are delivered as-is for RK VANTAGE GAMES. No trademark registration or copyright registration is claimed or performed by this project.
 - `Tools/generate_audio.py` reproduces the 32 WAV files; `Tools/generate_meta.py` reproduces meta GUIDs from asset paths. Regenerating metas for existing assets is safe only while an asset path is unchanged.

@@ -5,6 +5,8 @@ using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace NeonVelocity.EditorTools
 {
@@ -23,6 +25,7 @@ namespace NeonVelocity.EditorTools
         public const string BundleId = "games.rkvantage.neonvelocity";
         public const string Version = "1.0.0";
         private const string BuildsRoot = "Builds";
+        private const string GlobalSettingsPath = "Assets/Settings/UniversalRenderPipelineGlobalSettings.asset";
 
         [MenuItem("NEON VELOCITY/Configure Project and Build Settings", priority = 0)]
         public static void ConfigureProject()
@@ -47,6 +50,7 @@ namespace NeonVelocity.EditorTools
             PlayerSettings.Android.minSdkVersion = AndroidSdkVersions.AndroidApiLevel26;
             PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
+            PlayerSettings.SetScriptingBackend(NamedBuildTarget.iOS, ScriptingImplementation.IL2CPP);
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(MainScene, true) };
             EnsureRuntimeMaterialTemplates();
             EnsureAlwaysIncludedShaders();
@@ -290,7 +294,39 @@ namespace NeonVelocity.EditorTools
         [MenuItem("NEON VELOCITY/Build iOS Xcode Project", priority = 26)]
         public static void BuildIOS()
         {
-            Run(BuildTarget.iOS, Path.Combine(BuildsRoot, "iOS"));
+            // macOS uses the PC/Deferred quality level, where runtime-created materials
+            // need the full URP variant set. iOS uses the forward-only Mobile level, where
+            // general variant stripping is safe. Enable it only for this build so the
+            // macOS player keeps the unstripped PC variants.
+            URPShaderStrippingSetting stripping = GraphicsSettings.GetRenderPipelineSettings<URPShaderStrippingSetting>();
+            bool original = stripping != null && stripping.stripUnusedVariants;
+            bool success;
+            ConfigureProject();
+
+            // URP's build-time settings stripping edits the global-settings asset and can
+            // drop the runtime film-grain resources that the game's runtime-created volume
+            // profile uses. Keep the exact pre-build asset bytes so the editor project is
+            // unchanged after the export; the player data was already serialized by then.
+            AssetDatabase.SaveAssets();
+            byte[] settingsBeforeBuild = stripping != null && File.Exists(GlobalSettingsPath)
+                ? File.ReadAllBytes(GlobalSettingsPath)
+                : null;
+            try
+            {
+                if (stripping != null) stripping.stripUnusedVariants = true;
+                success = RunConfigured(BuildTarget.iOS, Path.Combine(BuildsRoot, "iOS"));
+            }
+            finally
+            {
+                if (stripping != null) stripping.stripUnusedVariants = original;
+                AssetDatabase.SaveAssets();
+                if (settingsBeforeBuild != null)
+                {
+                    File.WriteAllBytes(GlobalSettingsPath, settingsBeforeBuild);
+                    AssetDatabase.ImportAsset(GlobalSettingsPath, ImportAssetOptions.ForceUpdate);
+                }
+            }
+            if (!success) ExitBatch();
         }
 
         [MenuItem("NEON VELOCITY/Build Active Target", priority = 40)]
@@ -326,20 +362,25 @@ namespace NeonVelocity.EditorTools
         private static void Run(BuildTarget target, string outputPath)
         {
             ConfigureProject();
+            if (!RunConfigured(target, outputPath)) ExitBatch();
+        }
+
+        private static bool RunConfigured(BuildTarget target, string outputPath)
+        {
             if (!EditorBuildSettings.scenes.Length.Equals(1))
                 Debug.LogWarning("[BUILD] Unexpected scene list; Main should be the only enabled scene.");
             if (!File.Exists(MainScene))
             {
-                Fail($"Main scene missing at {MainScene}.");
-                return;
+                LogFailure($"Main scene missing at {MainScene}.");
+                return false;
             }
 
             // Install the player module before builds are attempted so batch CI fails clearly.
             if (!BuildPipeline.IsBuildTargetSupported(BuildPipeline.GetBuildTargetGroup(target), target))
             {
-                Fail($"{target} support is not installed for this Unity editor. " +
-                     "Install the module in Unity Hub > Installs > Add modules.");
-                return;
+                LogFailure($"{target} support is not installed for this Unity editor. " +
+                           "Install the module in Unity Hub > Installs > Add modules.");
+                return false;
             }
 
             string directory = Path.GetDirectoryName(outputPath);
@@ -356,16 +397,27 @@ namespace NeonVelocity.EditorTools
             BuildSummary summary = report.summary;
             if (summary.result != BuildResult.Succeeded)
             {
-                Fail($"{target} build {summary.result}: {summary.totalErrors} error(s).");
-                return;
+                LogFailure($"{target} build {summary.result}: {summary.totalErrors} error(s).");
+                return false;
             }
             Debug.Log($"[BUILD] Succeeded: {outputPath} ({summary.totalSize / (1024f * 1024f):0.0} MiB, " +
                       $"{summary.totalTime.TotalSeconds:0.0}s).");
+            return true;
         }
 
         private static void Fail(string message)
         {
+            LogFailure(message);
+            ExitBatch();
+        }
+
+        private static void LogFailure(string message)
+        {
             Debug.LogError("[BUILD] " + message);
+        }
+
+        private static void ExitBatch()
+        {
             if (Application.isBatchMode) EditorApplication.Exit(1);
         }
     }

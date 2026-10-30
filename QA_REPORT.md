@@ -20,6 +20,8 @@ This report records the defects found during the audit, the fixes applied, the c
 | Python backend tests | **79 / 79 passed** (race authority, accounts/auth, premium/payment, operator CLI and package configuration) | Executed |
 | Static project integrity | **936 / 936 checks passed** | Executed |
 | macOS universal player build | **Succeeded**, x86_64 + ARM64, ad-hoc signed, **122.5 MiB, 27.3 s build / 39.0 s wall**, rebuilt from Phase 03 source after the final label fix | Executed |
+| iOS Xcode export | **Succeeded**, `Builds/iOS` (1133.8 MiB; 16.7 s warm export), IL2CPP, bundle id `games.rkvantage.neonvelocity`, film-grain resources and Unity IAP StoreKit plugin present; `xcodebuild -list` parses | Executed (export) |
+| iOS unsigned device compile | **Succeeded**, `xcodebuild` `Release` / `iphoneos` for `generic/platform=iOS` with signing disabled; output `NEONVELOCITY.app` (arm64, iOS 15.0) | Executed (unsigned compile) |
 | Built player launch / capture run | Completed without runtime exceptions | Executed |
 | UI captures at 1600 × 900 | 18 Phase 02 screens inspected (menu, settings, premium-network settings, garage, modes, account tabs, events, world atlas, achievements, characters, five GEM tiers, gameplay ×2, active biome transition, subway/station, pause) | Executed (Phase 02 set) |
 | UI captures at 1280 × 800 (16:10) | Fresh 18 Phase 03 screens inspected, including the rebuilt GEM shop and post-fix labels; the Phase 02 1280 set is retained for comparison | Executed (Phase 03 set) |
@@ -30,13 +32,18 @@ This report records the defects found during the audit, the fixes applied, the c
 | Live SMTP/SMS/Google/Apple sign-in | No provider credentials or native Google/Apple sign-in plugin | Unverified |
 | Phase 03 shop visual capture | PlayMode text/layout coverage only; captures predate the shop rewrite | Unverified |
 | Physical 4K display output | Not available | Unverified |
-| Windows / Linux / Android / iOS builds | Platform modules not available/verified | Unverified |
+| Windows / Linux / Android builds | Platform modules not available/verified | Unverified |
+| Signed iOS archive / device install | No Apple team, provisioning profile or device; unsigned compile succeeded, but signing/archive/install were not performed | Unverified |
 | Real-device touch, controller, audio, suspend/resume | No test devices | Unverified |
 | Real multi-client Unity race | No second Unity client/device | Unverified |
 | CPU/GPU/memory/thermal profiling | No profiling run | Unverified |
 | Full manual playthrough of all 15 modes | Not completed | Unverified |
 
 The 4K result is an actual 3840 × 2160 backbuffer/screenshot produced by the built player. The host display is 1600 × 900, so physical 4K-display behaviour, cable/HDMI mode negotiation and 4K frame-rate performance remain unverified. The final build log contains only non-blocking Unity platform/licensing notices; it has no script compilation warnings or errors.
+
+### Post-audit update — iOS Xcode export (30 October 2026)
+
+The earlier iOS attempt returned **`Build completed with a result of 'Unknown' in 0 seconds`** because the project had resolved Unity IAP 5.4.4 while `NeonVelocity.Runtime.asmdef` still referenced the 4.x assembly names. The runtime references are now `Unity.Purchasing` / `Unity.Purchasing.Stores`; the editor build script compiles and the iOS export succeeds. The build also temporarily enables URP general variant stripping for the forward-only Mobile quality level (restoring the setting afterwards), because the unstripped URP Lit Metal set contained **1,769,472** variants. A macOS mobile-quality capture with the same stripping produced correct world rendering; the PC/Deferred quality level keeps stripping disabled. URP post-processing resource stripping stays disabled so the runtime volume profile keeps film grain; `BuildIOS` snapshots and restores the global-settings asset so the build cannot drop it from the editor project. The generated project contains the Unity IAP StoreKit plugin and `StoreKit.framework`, `xcodebuild -list` parses its targets/schemes, and an unsigned `Release` / `iphoneos` build produced `NEONVELOCITY.app` (arm64, iOS 15.0, about 140 MB, 0 errors). **No signed archive, device install or live IAP transaction has been performed.**
 
 ## 2. Issues found and fixed
 
@@ -306,7 +313,7 @@ The 4K result is an actual 3840 × 2160 backbuffer/screenshot produced by the bu
 
 **Result:** Passed for the captured macOS player.
 
-**Limitation:** URP unused-variant stripping must remain disabled until world materials are authored assets rather than runtime-created; this increases build size and build time. Other platforms are unverified.
+**Limitation:** URP general unused-variant stripping remains disabled for the PC/Deferred quality level because its runtime-created world materials need the full variant set; this increases the macOS player's shader footprint. The iOS build enables it only for the forward-only Mobile level and restores the setting afterward. Other platforms are unverified.
 
 ### QA-18 — High — Long header section labels overlapped the subtitle
 
@@ -530,7 +537,7 @@ These are product/quality improvements rather than regressions:
 
 These are not reported as fixed:
 
-1. **Platform coverage:** only macOS was built and launched. Windows, Linux, WebGL, Android and iOS builds were not produced or run.
+1. **Platform coverage:** macOS was built and launched; the iOS Xcode project was generated, parsed by Xcode and compiled unsigned for `iphoneos`, but not signed or run on a device. Windows, Linux, WebGL and Android builds were not produced or run.
 2. **Physical 4K:** the player produced 4K PNGs in a 1600 × 900 host session, but no physical 4K display, HDR display, HDMI/DisplayPort negotiation or 4K performance measurement was available.
 3. **Mobile:** no Android/iOS device. Touch gestures, safe areas, notches, thermal throttling and Android system Back remain unverified. Quality settings are coded to stay independent of desktop.
 4. **Controller and accessibility:** keyboard/controller code paths exist and some are covered indirectly, but focus order, remapping, vibration and real-device gamepad navigation were not tested. No screen-reader/color-blind palette support.
@@ -590,7 +597,7 @@ Phase 03 connected the existing UI to real account, offline-save, server-wallet,
 - **Offline:** the game boots and plays without an account. XP, level, best/total distance, COINS, character/unlocks/items/upgrades, missions, achievements, discoveries and settings persist locally.
 - **Save/sync:** cloud merge uses `baseRevision`, an idempotency key, max scalar progression, unioned reward IDs and conflict summaries. GEMS, premiums, transactions and provider tokens are excluded from sync and remain server-authoritative.
 - **Economy:** COINS are earned in gameplay; GEMS are real-money only. The server owns the wallet, catalogue, ownership, ledger, purchase validation, duplicate prevention and atomic revive debits.
-- **Payments:** Apple IAP and Google Play Billing through Unity IAP 4.15.1, Stripe-hosted Checkout for desktop/web, server-side verification, signed webhooks, duplicate-charge/credit prevention, cancel/failure handling, transaction records and refund reversal. No card data or provider secret enters Unity.
+- **Payments:** Apple IAP and Google Play Billing through Unity IAP 5.4.4, Stripe-hosted Checkout for desktop/web, server-side verification, signed webhooks, duplicate-charge/credit prevention, cancel/failure handling, transaction records and refund reversal. No card data or provider secret enters Unity.
 - **Receipts:** sent after verified success when SMTP is configured; the destination defaults to the account's verified/receipt email and can be changed. Includes game name, account/player id, transaction id and provider reference, item/package, GEMS, amount/currency, provider, date and status.
 - **Shop:** the UI is backed by the server catalogue, covering packages and premium characters/skins/helmets/armour/trails/animations/effects/power-ups/boosters/revives with mixed COIN/GEM/real-money pricing. Prices are operator-configurable.
 - **Revive:** captures the exact death state, validates and debits GEMS once, then restores the run with brief invulnerability. Insufficient balance shows **NOT ENOUGH GEMS!** with BUY GEMS / RESTART / CLOSE; BUY GEMS opens the real shop.

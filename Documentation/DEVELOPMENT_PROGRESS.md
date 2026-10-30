@@ -130,7 +130,7 @@ The verified macOS build renders a materially richer, original neon world with r
 - The premium backend is a separate dependency-free Python 3.9+ HTTP + SQLite service (`Backend/premium_server.py`, `premium_store.py`, `payments.py`, `account_store.py`, `identity.py`, `premium_admin.py`) with guest/account tokens, wallet/ownership, configurable catalogue, ledger, transaction history, admin review, receipts and idempotent purchase/revive debits.
 - **COINS are the earned soft currency** (`profile.credits`) and remain local gameplay progression merged through cloud sync. **GEMS are real-money only**; gameplay, missions, XP, random rewards and offline play never award them.
 - Five GEM tiers are served and operator-configurable: `gems_80` STARTER 80/490 LKR, `gems_200` BASIC 210/1190, `gems_500` PREMIUM 550/2890, `gems_1200` MEGA 1380/6490 and `gems_2500` ULTIMATE 3000/12900. `NV_GEM_PACKAGE_<ID>_{GEMS,BONUS_GEMS,PRICE_LKR,NAME,DESCRIPTION,ENABLED}` overrides are validated with safe fallbacks. Admin edits can change name, description, reference price and enabled state but **cannot change GEM counts**.
-- **Normal purchases use official store surfaces.** Unity IAP 4.15.1 opens Apple In-App Purchase on iOS and Google Play Billing on Android. Desktop/web opens Stripe-hosted Checkout in the system browser. No card number, CVV or provider secret enters the Unity client or the local save.
+- **Normal purchases use official store surfaces.** Unity IAP 5.4.4 opens Apple In-App Purchase on iOS and Google Play Billing on Android. Desktop/web opens Stripe-hosted Checkout in the system browser. No card number, CVV or provider secret enters the Unity client or the local save.
 - **Server verification is mandatory.** Stripe credits only from a signed webhook; Apple verifies the receipt against the App Store with sandbox fallback; Google verifies the purchase token through the Android Publisher API with a service account. Idempotency is keyed on the provider event/transaction id, so duplicate webhooks or receipts do not credit twice.
 - `GET /api/v1/store/payments` exposes capability flags. The shop refuses to start a charge when the matching provider is unconfigured, so a missing credential can never charge a player.
 - GEMS are never awarded by gameplay. CREDITS remain the earned soft currency for local tech/cosmetics; all prior UI labels that incorrectly called credits “GEMS” were corrected.
@@ -205,6 +205,7 @@ On this macOS Metal host, one automated capture run produced a tiled/duplicated-
 | Python tests | **79 / 79 passed** (race authority + account/auth + premium/payment + operator CLI + package configuration) |
 | Build compilation | **Succeeded**; no script compilation errors |
 | macOS build | `Builds/macOS/NeonVelocity.app`, universal x86_64 + ARM64, ad-hoc signed, **122.5 MiB, 27.3 s build / 39.0 s wall**, rebuilt from Phase 03 source after the final label fix |
+| iOS Xcode export | `Builds/iOS/Unity-iPhone.xcodeproj`, IL2CPP, Unity IAP 5.4.4 StoreKit plugin, film-grain resources; **1133.8 MiB, 16.7 s warm / 46.0 s first stripped build**; unsigned `Release`/`iphoneos` compile succeeds (140 MB arm64 app, 0 errors); `xcodebuild -list` passes |
 | Runtime capture log | Final Phase 03 capture completed with no runtime exceptions or warnings |
 
 PlayMode coverage: real bootstrap, title stage, Practice start, clean shutdown, quick-tap jump clearance, centralized navigation/Back routes, Settings-from-Pause, Results return, restart rebuilding a fresh run, garage cleanup, purchase-confirmation safety, Phase 03 shop tabs and retired bank-transfer removal, offline transaction-history state, premium-screen navigation, Account/Events/World Atlas/Achievements construction and return, PHANTOM X ability/cooldown, exact-distance revive, premium-endpoint cache reset, every main-menu destination label, independent HUD score/distance tickers, HUD/toast suppression and restoration across pause, and a real 30 km `TrackManager` stream across 3/6/9/15/30 km checkpoints with bounded pools and district/junction/save assertions.
@@ -220,7 +221,7 @@ PlayMode coverage: real bootstrap, title stage, Practice start, clean shutdown, 
 ### Not verified
 
 - Physical 4K/HDR display, cable negotiation and 4K frame rate.
-- Windows/Linux/Android/iOS builds and real-device input/audio.
+- Windows/Linux/Android builds, a signed iOS archive/device install and real-device input/audio.
 - CPU/GPU/memory/thermal profiling and long-session memory growth.
 - Full manual playthrough of all 15 modes; every obstacle, power-up, junction branch, collision, restart and persistence path.
 - Real two/five-client Unity races and reconnect through the UI.

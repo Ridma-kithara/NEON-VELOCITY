@@ -2,7 +2,7 @@
 
 **Project:** NEON VELOCITY  
 **Studio:** RK VANTAGE GAMES  
-**Engine:** Unity 6000.6.7f1 / URP 17.6 / Input System 1.20 / Unity IAP 4.15.1  
+**Engine:** Unity 6000.6.7f1 / URP 17.6 / Input System 1.20 / Unity IAP 5.4.4  
 **Backend:** dependency-free Python 3.9+ HTTP + SQLite services  
 **Date:** 29 October 2026  
 **Verdict:** **Implemented and locally verified. Not production-live.** No real card, App Store or Google Play transaction has been completed in this environment.
@@ -122,8 +122,8 @@ Reference LKR prices are display/reference values. Stripe uses server price ids 
 
 | Platform | Checkout surface | Server verification |
 | --- | --- | --- |
-| iOS | Apple In-App Purchase sheet through Unity IAP 4.15.1 | App Store receipt verification with shared secret; sandbox fallback |
-| Android | Google Play Billing sheet through Unity IAP 4.15.1 | Android Publisher API purchase lookup with a service account |
+| iOS | Apple In-App Purchase sheet through Unity IAP 5.4.4 | App Store receipt verification with shared secret; sandbox fallback |
+| Android | Google Play Billing sheet through Unity IAP 5.4.4 | Android Publisher API purchase lookup with a service account |
 | Desktop / web | Stripe-hosted Checkout in the system browser | Signed Stripe webhook |
 | Legacy operator opt-in | Manual bank transfer, disabled by default | Human reconciliation only |
 
@@ -348,7 +348,7 @@ The following must be supplied before any live sale can be claimed:
 
 ### Platform builds and policy
 
-- iOS/Android modules, signing, provisioning, store metadata and real-device test accounts.
+- Apple signing team/provisioning, App Store metadata, Android module/signing and real-device test accounts. The iOS Xcode project itself is generated and compiles unsigned for `iphoneos`.
 - Terms of sale, privacy policy, refund policy, tax and age-consent review.
 - Confirmation that each distribution channel permits the chosen payment surface.
 
@@ -359,7 +359,7 @@ The following must be supplied before any live sale can be claimed:
 1. **No live payment evidence.** This is the largest gap. The code path exists; a real provider transaction does not.
 2. **No native Google/Apple sign-in.** Server token verification is tested, but the Unity client cannot mint a provider session.
 3. **No live SMTP/SMS.** Receipt and OTP delivery are unverified against real providers.
-4. **No device IAP test.** Unity IAP compiles and is integrated, but store products/test accounts were unavailable.
+4. **No device IAP test.** Unity IAP 5.4.4 compiles and is included in the generated iOS Xcode project, but store products, signing and test accounts were unavailable.
 5. **Apple/Google refunds require manual reconciliation.** Stripe full refunds auto-reverse; the other stores do not notify this service.
 6. **Stripe partial refunds are recorded, not proportionally reversed.**
 7. **Admin is single-credential.** No MFA, roles or bulk tooling.
@@ -370,7 +370,7 @@ The following must be supplied before any live sale can be claimed:
 12. **No tax/accounting/chargeback automation.**
 13. **No fresh visual capture of transaction history, success, cancel or failure states.** The default BUY GEMS package screen is captured at 1280×800; PlayMode covers layout/text for the other tabs.
 14. **Phase 03 UI label clipping was found in an earlier fresh capture and fixed** (provider status and receipt sign-in prompts shortened). The final build was recompiled, all suites rerun and the 18-screen 1280×800 capture regenerated; the fixed labels are visible in `Captures/phase03/1280x800/gem-shop-packages.png`.
-15. **The macOS app is ad-hoc signed**, not notarised; Windows/Linux/Android/iOS builds were not produced here.
+15. **The macOS app is ad-hoc signed**, not notarised. The iOS Xcode project was generated and compiles unsigned for `iphoneos` but is not signed or device-tested; Windows/Linux/Android builds were not produced here.
 16. **Performance/device coverage remains outstanding:** no physical 4K display, real-device audio/input, thermal testing or 4K frame-rate profile.
 
 ---
@@ -379,7 +379,7 @@ The following must be supplied before any live sale can be claimed:
 
 Phase 03 delivers a real account/offline/economy/payment architecture and connects it to the existing game. The server is authoritative for GEMS, payments, transactions, premium ownership and account security. The normal shop no longer uses manual bank-transfer proof upload; it presents official platform checkout and verified transaction history. COINS remain the gameplay currency; GEMS are real-money only; revive and premium purchases debit the server wallet atomically.
 
-The implementation is **not** a live payment deployment. No merchant credentials, store products, HTTPS host, native Google/Apple sign-in plugin or real provider transaction exists in this environment. The correct production statement is:
+The implementation is **not** a live payment deployment. No merchant credentials, store products, HTTPS host, native Google/Apple sign-in plugin or real provider transaction exists in this environment. An unsigned iOS Xcode project is generated at `Builds/iOS` and compiles for `iphoneos`; no Apple team, provisioning profile, archive or device purchase has been completed. The correct production statement is:
 
 > **Phase 03 is implemented and locally verified; live payments and live provider sign-in remain unverified and require the credentials/services listed in section 10.**
 

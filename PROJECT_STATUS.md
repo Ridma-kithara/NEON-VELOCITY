@@ -1,9 +1,10 @@
 # NEON VELOCITY — Project Status
 
 **Studio:** RK VANTAGE GAMES  
-**Last updated:** 29 October 2026  
+**Last updated:** 30 October 2026  
 **Engine:** Unity 6000.6.7f1 / URP 17.6 / Input System 1.20  
-**Verified build:** `Builds/macOS/NeonVelocity.app` — rebuilt 29 Oct 2026 from Phase 03 source after the final shop label fix, universal x86_64 + ARM64, ad-hoc signed, **122.5 MiB, 27.3 s build (39.0 s wall)** (see build result below)  
+**Verified build:** `Builds/macOS/NeonVelocity.app` — rebuilt 29 Oct 2026 from Phase 03 source after the final shop label fix, universal x86_64 + ARM64, ad-hoc signed, **122.5 MiB, 27.3 s build (39.0 s wall)**  
+**iOS export:** `Builds/iOS/Unity-iPhone.xcodeproj` — generated 30 Oct 2026 with the iOS module and Unity IAP 5.4.4; unsigned Release/iphoneos Xcode build compiled, not signed or run on a device  
 **Repository:** `Ridma-kithara/NEON-VELOCITY` (`main`)
 
 ## 1. Current state
@@ -34,7 +35,7 @@ The game is playable offline, and the offline menu, garage, settings, shop, acco
 | Visual upgrade | Beveled layered runner armour, generated materials, recessed storefront city, layered facades, street trees/furniture, wet practical light pools, textured rain/mist, abstract signage, subway station and post-processing |
 | PC 4K support | Actual 3840 × 2160 render/capture verified on the host; physical 4K display and 4K performance not verified |
 | Mobile quality profile | Implemented with independent mobile settings path; no device build/validation |
-| Builds | macOS universal verified; Windows/Linux/WebGL/Android/iOS not built here |
+| Builds | macOS universal verified; iOS Xcode project generated and unsigned device build compiled (not signed/device-tested); Windows/Linux/WebGL/Android not built here |
 
 ## 2. Final verification results
 
@@ -47,6 +48,7 @@ The game is playable offline, and the offline menu, garage, settings, shop, acco
 | Static integrity | **936 / 936 passed** |
 | Compilation | **0 errors** in the tested assemblies |
 | macOS build | **Succeeded**, universal x86_64 + arm64, ad-hoc signed, **122.5 MiB, 27.3 s build / 39.0 s wall** — rebuilt 29 Oct 2026 after the final shop label fix |
+| iOS Xcode export | **Succeeded** at `Builds/iOS` (**1133.8 MiB**; **16.7 s** warm export, **46.0 s** first stripped export) with IL2CPP, bundle id `games.rkvantage.neonvelocity`, film-grain resources and the Unity IAP StoreKit plugin. An unsigned `Release` / `iphoneos` Xcode device build compiles the arm64 app; signing and device install/run are not performed here. |
 | Captures | Fresh **18-screen Phase 03 set at 1280 × 800** (`Captures/phase03/1280x800`), including the rebuilt GEM shop after the label fix; the 1600 × 900 and 3840 × 2160 sets remain the Phase 02 captures |
 | Runtime capture log | Final Phase 03 capture completed without runtime exceptions, shader-stripping warnings or missing-resource errors |
 
@@ -98,7 +100,7 @@ The PlayMode suite includes real bootstrap, Practice start, quick-tap jump clear
 - Save schema v5 stores authoritative total XP, 3 km location records, time-of-day mode/phase/cycle, premium cache/ownership, cosmetic loadout, expanded lifetime stats, master volume and server URL, with v4 legacy-XP migration, retired-district removal and defensive normalisation.
 - Premium backend (`Backend/premium_server.py`, `premium_store.py`, `payments.py`, `account_store.py`, `identity.py`, SQLite): five GEM tiers, server wallet/ownership/ledger, idempotent purchases/revives, account/cloud-sync endpoints, admin catalogue/account/transaction/refund routes, Stripe hosted checkout plus signed webhooks, Apple receipt verification, Google Play service-account verification, receipts and operator CLI. GEMS are never minted locally or by gameplay.
 - Unity `PremiumService` is the only GEM authority client: online wallet, ownership, platform purchase verification, transaction history, purchases, idempotent revive and explicit STORE OFFLINE errors. Cached balances are display-only. The endpoint is editable at **Settings → Network → Premium Store URL**.
-- `Assets/Game/Scripts/Premium/PlatformStore.cs` uses Unity IAP 4.15.1 for Apple/Google store sheets. It forwards the raw purchase token/receipt to the backend, which verifies with the provider before crediting. Store purchases are blocked when the server has no provider capability.
+- `Assets/Game/Scripts/Premium/PlatformStore.cs` uses Unity IAP 5.4.4 for Apple/Google store sheets. It forwards the raw purchase token/receipt to the backend, which verifies with the provider before crediting. Store purchases are blocked when the server has no provider capability.
 - GEM SHOP now has **BUY GEMS / PREMIUM STORE / TRANSACTION HISTORY**. The bank account, exact-amount transfer instructions, receipt upload and order-proof UI were removed. Packages show provider-specific price guidance, the receipt email is selected from the verified account and can be changed, and successful purchases show verified transaction records.
 - Exact-position revive keeps the crashed session alive, previews rewards, performs a server-verified atomic debit and resumes the captured distance/lane/pose with invulnerability. Insufficient balance shows **NOT ENOUGH GEMS!** with BUY GEMS / RESTART / CLOSE. Leaving, restarting or quitting finalises the pending run exactly once.
 - Account sync merges progression with the server (max scalar progress, unioned reward IDs, conflict-safe revisions) and deliberately excludes GEMS, transactions and premium ownership, which remain server-owned. Offline play never requires a profile.
@@ -140,7 +142,7 @@ This is intentionally a code-only/original pipeline. It is not a production DCC 
 - Physical 4K display output, HDR, cable/mode negotiation and 60 FPS at 4K.
 - Live confirmation that an intermittent macOS Metal screenshot-readback artifact (one tiled/duplicated-UI frame, clean on reruns) cannot appear on a physical display.
 - LOD, occlusion culling, profiler-driven frame-time validation and dynamic tree/foliage wind; none were implemented in the environment slice.
-- Windows, Linux, WebGL, Android and iOS builds; real Android system Back behaviour and Unity IAP on device.
+- Windows, Linux, WebGL and Android builds; signed iOS archive/device install, real Android system Back behaviour and Unity IAP on device.
 - Real touch, gamepad focus order, audio balance, suspend/resume and safe areas on devices.
 - Two/five real Unity clients, latency/loss, reconnect through the UI, NAT/TLS.
 - CPU/GPU/memory/thermal profiling and long-session memory growth.
@@ -159,7 +161,7 @@ This is intentionally a code-only/original pipeline. It is not a production DCC 
 1. Deploy the premium service behind HTTPS with a real admin credential/secret, provider credentials, backups and monitoring. Configure Stripe live keys, webhook secret, price map and HTTPS return URLs; run a controlled live card purchase, refund and receipt delivery test.
 2. Configure Apple/Google merchant accounts, store products and product maps, add native Google/Apple sign-in plugins if provider login is required, then run sandbox store purchases on real iOS/Android hardware. Verify every purchase against the backend and confirm one-time credit.
 3. Configure SMTP/SMS providers and verify a sending domain; test verification, reset, OTP and receipt email end to end.
-4. Run a full manual QA pass on macOS (menus, Back, saves/settings, restart, collision/death, results, exact revive, shop tabs, transaction history), then produce and test Windows and Android builds on real hardware.
+4. Run a full manual QA pass on macOS (menus, Back, saves/settings, restart, collision/death, results, exact revive, shop tabs, transaction history). Select an Apple team in `Builds/iOS/Unity-iPhone.xcodeproj`, run/archive it on a device, then produce and test Windows and Android builds on real hardware.
 5. Capture a fresh Phase 03 visual set including the rebuilt GEM SHOP and transaction history; keep the synchronous harness as a fallback.
 6. Profile 4K and low-end mobile; measure frame time, memory and thermal behaviour, then add LOD/occlusion or instancing where justified.
 7. Add per-theme storefront/facade variants and dynamic foliage wind to reduce repetition and add environmental motion.
